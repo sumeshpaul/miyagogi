@@ -354,18 +354,39 @@ async def interpret_query(data: ProductQuery):
         return {"error": "Interpretation failed."}
 
 # ──────────────────────────────── /ask Endpoint for Hermes Chat (Improved) ─────────────────────────────
+# ──────────────────────────────── /ask Endpoint for Hermes Chat (Improved) ─────────────────────────────
 @app.post("/ask", response_model=Dict[str, str])
 async def ask_hermes(data: ProductQuery, user_id: str = Query(...)):
     query_text = data.query.strip()
     messages = user_chat_memory[user_id][-MEMORY_MAX_TURNS:]
     messages.append({"role": "user", "content": query_text})
 
-    # �� Check memory for vague follow-up
+    # 🧠 Check memory for vague follow-up
     vague_keywords = ["how much", "price", "is it in stock", "availability", "is it good"]
     if any(kw in query_text.lower() for kw in vague_keywords):
         last_product = user_last_product_match.get(user_id)
         if last_product:
-            query_text = last_product  # Replace query with last matched product
+            query_text = last_product
+
+    # 🔍 Special Case: Show all brands
+    if query_text.lower() in ["show all brands", "brands available", "list brands"]:
+        WC_URL = os.getenv("WC_URL") + "/wp-json/wc/v3/products"
+        WC_KEY = os.getenv("WC_KEY")
+        WC_SECRET = os.getenv("WC_SECRET")
+        response = requests.get(
+            WC_URL,
+            params={"per_page": 100},
+            auth=HTTPBasicAuth(WC_KEY, WC_SECRET),
+        )
+        if response.status_code == 200 and response.json():
+            brand_tags = set()
+            for product in response.json():
+                for tag in product.get("tags", []):
+                    brand_tags.add(tag.get("name", "").strip())
+            brand_list = ", ".join(sorted(brand_tags))
+            return {"response": f"Here are the brands available at Miyagogi: {brand_list}."}
+        else:
+            return {"response": "Sorry, I couldn’t fetch brand information right now."}
 
     # 🔁 Step 1: WooCommerce API live search
     WC_URL = os.getenv("WC_URL") + "/wp-json/wc/v3/products"
@@ -387,7 +408,6 @@ async def ask_hermes(data: ProductQuery, user_id: str = Query(...)):
         product_sentence = f"The {name} is available for AED {price} and it's currently {stock}. {summary.strip()}"
         user_last_product_match[user_id] = name.lower()
     else:
-        # 🧃 Step 2: Soft keyword fallback
         keywords = query_text.lower().split()
         results = search_products_by_keywords(keywords, DB_PATH)
         if results:
@@ -400,7 +420,6 @@ async def ask_hermes(data: ProductQuery, user_id: str = Query(...)):
                 return {"response": "Here are a few products you might like:\n" + "\n".join(suggestions[:3]) + "\n\nLet me know if you'd like help comparing them."}
         return {"response": "I couldn’t find a match for that. Could you rephrase or try a brand like Thuya or Noemi?"}
 
-    # 🧠 Build prompt
     prompt = (
         "You are Aura, a helpful beauty assistant at Miyagogi.\n"
         "Start by clearly stating the product name, price, and availability.\n"
