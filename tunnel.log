@@ -1,31 +1,15 @@
 nohup: ignoring input
-2025-05-24T17:54:48Z INF Starting tunnel tunnelID=8aa69cab-e827-4274-8679-462ba7c5e127
-2025-05-24T17:54:48Z INF Version 2025.4.2 (Checksum c4f2c09e38569f850da274d3b8502ea88304c1bd0a4f1528b420c23f715d4551)
-2025-05-24T17:54:48Z INF GOOS: linux, GOVersion: go1.22.10, GoArch: amd64
-2025-05-24T17:54:48Z INF Settings: map[cred-file:/home/sam/.cloudflared/8aa69cab-e827-4274-8679-462ba7c5e127.json credentials-file:/home/sam/.cloudflared/8aa69cab-e827-4274-8679-462ba7c5e127.json p:http2 protocol:http2]
-2025-05-24T17:54:48Z INF Generated Connector ID: 16f4d98c-2352-4b4d-80fa-6a705ec794b1
-2025-05-24T17:54:48Z INF cloudflared will not automatically update if installed by a package manager.
-2025-05-24T17:54:48Z INF Initial protocol http2
-2025-05-24T17:54:48Z INF ICMP proxy will use 192.168.50.133 as source for IPv4
-2025-05-24T17:54:49Z INF ICMP proxy will use fe80::90c6:6701:682a:ed02 in zone wlp131s0 as source for IPv6
-2025-05-24T17:54:49Z WRN The user running cloudflared process has a GID (group ID) that is not within ping_group_range. You might need to add that user to a group within that range, or instead update the range to encompass a group the user is already in by modifying /proc/sys/net/ipv4/ping_group_range. Otherwise cloudflared will not be able to ping this network error="Group ID 1000 is not between ping group 1 to 0"
-2025-05-24T17:54:49Z WRN ICMP proxy feature is disabled error="cannot create ICMPv4 proxy: Group ID 1000 is not between ping group 1 to 0 nor ICMPv6 proxy: socket: permission denied"
-2025-05-24T17:54:49Z INF ICMP proxy will use 192.168.50.133 as source for IPv4
-2025-05-24T17:54:49Z INF ICMP proxy will use fe80::90c6:6701:682a:ed02 in zone wlp131s0 as source for IPv6
-2025-05-24T17:54:49Z INF Starting metrics server on 127.0.0.1:20242/metrics
-2025-05-24T17:54:49Z INF Registered tunnel connection connIndex=0 connection=75aa6afc-fc26-4cf1-85f8-3e039121b3c8 event=0 ip=198.41.192.57 location=dxb02 protocol=http2
-2025-05-24T17:54:50Z INF Registered tunnel connection connIndex=1 connection=abf3d2ee-c27f-43c2-a6d0-9b01d1ff5712 event=0 ip=198.41.200.23 location=ams01 protocol=http2
-2025-05-24T17:54:50Z INF Registered tunnel connection connIndex=2 connection=6b6fd90f-4015-47c4-bbef-58bc90c50e6a event=0 ip=198.41.192.77 location=dxb02 protocol=http2
-2025-05-24T17:54:52Z INF Registered tunnel connection connIndex=3 connection=e78da51e-53cc-4bee-8de1-6c92ac658d47 event=0 ip=198.41.200.33 location=ams17 protocol=http2
-2025-05-24T17:55:02Z INF Initiating graceful shutdown due to signal terminated ...
-2025-05-24T17:55:02Z INF Unregistered tunnel connection connIndex=0 event=0 ip=198.41.192.57
-2025-05-24T17:55:03Z INF Retrying connection in up to 1s connIndex=0 event=0 ip=198.41.192.57
-2025-05-24T17:55:03Z INF Unregistered tunnel connection connIndex=3 event=0 ip=198.41.200.33
-2025-05-24T17:55:03Z INF Unregistered tunnel connection connIndex=1 event=0 ip=198.41.200.23
-2025-05-24T17:55:03Z INF Unregistered tunnel connection connIndex=2 event=0 ip=198.41.192.77
-2025-05-24T17:55:03Z INF Retrying connection in up to 1s connIndex=2 event=0 ip=198.41.192.77
-2025-05-24T17:55:03Z INF Retrying connection in up to 1s connIndex=3 event=0 ip=198.41.200.33
-2025-05-24T17:55:03Z INF Retrying connection in up to 1s connIndex=1 event=0 ip=198.41.200.23
-2025-05-24T17:55:03Z ERR no more connections active and exiting
-2025-05-24T17:55:03Z INF Tunnel server stopped
-2025-05-24T17:55:03Z INF Metrics server stopped
+2025-05-24T17:55:05Z INF Starting tunnel tunnelID=8aa69cab-e827-4274-8679-462ba7c5e127
+2025-05-24T17:55:05Z INF Version 2025.4.2 (Checksum c4f2c09e38569f850da274d3b8502ea88304c1bd0a4f1528b420c23f715d4551)
+2025-05-24T17:55:05Z INF GOOS: linux, GOVersion: go1.22.10, GoArch: amd64
+2025-05-24T17:55:05Z INF Settings: map[cred-file:/home/sam/.cloudflared/8aa69cab-e827-4274-8679-462ba7c5e127.json credentials-file:/home/sam/.cloudflared/8aa69cab-e827-4274-8679-462ba7c5e127.json p:http2 protocol:http2]
+2025-05-24T17:55:05Z INF Generated Connector ID: e74880fc-3c49-403c-a45e-cc70356d2313
+2025-05-24T17:55:05Z INF cloudflared will not automatically update if installed by a package manager.
+2025-05-24T17:55:05Z INF Initial protocol http2
+2025-05-24T17:55:05Z INF ICMP proxy will use 192.168.50.133 as source for IPv4
+2025-05-24T17:55:05Z INF ICMP proxy will use fe80::90c6:6701:682a:ed02 in zone wlp131s0 as source for IPv6
+2025-05-24T17:55:05Z WRN The user running cloudflared process has a GID (group ID) that is not within ping_group_range. You might need to add that user to a group within that range, or instead update the range to encompass a group the user is already in by modifying /proc/sys/net/ipv4/ping_group_range. Otherwise cloudflared will not be able to ping this network error="Group ID 1000 is not between ping group 1 to 0"
+2025-05-24T17:55:05Z WRN ICMP proxy feature is disabled error="cannot create ICMPv4 proxy: Group ID 1000 is not between ping group 1 to 0 nor ICMPv6 proxy: socket: permission denied"
+2025-05-24T17:55:05Z INF ICMP proxy will use 192.168.50.133 as source for IPv4
+2025-05-24T17:55:05Z INF ICMP proxy will use fe80::90c6:6701:682a:ed02 in zone wlp131s0 as source for IPv6
+2025-05-24T17:55:05Z INF Starting metrics server on 127.0.0.1:20242/metrics
