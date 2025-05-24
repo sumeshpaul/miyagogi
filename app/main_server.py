@@ -162,24 +162,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     async with aiohttp.ClientSession() as session:
         try:
-            # 🔍 Step 1: Interpret user intent
-            async with session.post("http://localhost:8000/interpret", json={"query": query}) as resp:
-                interpreted = await resp.json()
-                keywords = interpreted.get("keywords", query)
-
-            # 📦 Step 2: Try structured product search
-            async with session.post("http://localhost:8000/search-products", json={"query": keywords}) as resp:
-                result = await resp.json()
-                search_text = result.get("response", "")
-
-            # 🧠 Step 3: Always ask Hermes for natural language context
-            chat_text = ""
+            # 🧠 Step 1: Ask Hermes for natural language + Woo fallback
             async with session.post(f"http://localhost:8000/ask?user_id={user_id}", json={"query": query}) as chat_resp:
                 chat_result = await chat_resp.json()
-                chat_text = html.unescape(chat_result.get("response", ""))
-
-            reply_text, reason = prioritize_reply_logic(search_text, chat_text)
-            logger.info(f"📤 Reply strategy: {reason}")
+                reply_text = html.unescape(chat_result.get("response", ""))
 
         except Exception as e:
             reply_text = f"❌ Error: {str(e)}"
