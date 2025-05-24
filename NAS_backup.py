@@ -2,18 +2,16 @@ import os
 import shutil
 from datetime import datetime
 
-# Define source and destination
-SOURCE_FILE = "/mnt/ssd2tb/projects/miyagogi/logs.csv"
+# Source and destination paths
+SOURCE_DIR = "/mnt/ssd2tb/projects/miyagogi"
 TIMESTAMP = datetime.now().strftime("%Y%m%d_%H%M")
-DEST_DIR = "/mnt/nas_llm/backups"
-DEST_FILE = f"{DEST_DIR}/miyagogi_logs_prod_v1_{TIMESTAMP}.csv"
+DEST_DIR = f"/mnt/nas_llm/backups/miyagogi_project_backup_{TIMESTAMP}"
 
-# Ensure destination exists
-os.makedirs(DEST_DIR, exist_ok=True)
+# Perform recursive folder copy
+shutil.copytree(SOURCE_DIR, DEST_DIR)
 
-# Copy and verify
-shutil.copy2(SOURCE_FILE, DEST_FILE)
-if os.path.exists(DEST_FILE) and os.path.getsize(DEST_FILE) > 0:
-    print(f"✅ Backup successful: {DEST_FILE}")
+# Confirm backup
+if os.path.exists(DEST_DIR):
+    print(f"✅ Full project backup successful:\n→ {DEST_DIR}")
 else:
     print("❌ Backup failed.")
