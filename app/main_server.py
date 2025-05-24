@@ -31,6 +31,7 @@ from peft import PeftModel
 from telegram import Update
 from telegram.constants import ParseMode
 from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filters
+from logic_handler import prioritize_reply_logic
 
 # ───────────────────────────────────────────────
 # External APIs and Business Logic
@@ -173,17 +174,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 chat_result = await chat_resp.json()
                 chat_text = html.unescape(chat_result.get("response", ""))
 
-            # ✅ FINAL PRIORITY LOGIC: Combine both results
-            if search_text.strip().startswith("❌ No matching products found."):
-                reply_text = chat_text  # Don't include empty product dump
-            elif search_text and chat_text:
-                reply_text = f"{search_text}\n\n<b>AI Insight:</b>\n{chat_text}"
-            elif search_text:
-                reply_text = search_text
-            elif chat_text:
-                reply_text = chat_text
-            else:
-                reply_text = "❌ No relevant products or insights found."
+            reply_text, reason = prioritize_reply_logic(search_text, chat_text)
+            logger.info(f"📤 Reply strategy: {reason}")
 
         except Exception as e:
             reply_text = f"❌ Error: {str(e)}"
