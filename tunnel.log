@@ -20,3 +20,4 @@ nohup: ignoring input
 2025-05-24T17:53:03Z INF Using [CurveID(4588) CurveID(25497) CurveP256] as curve preferences connIndex=0 event=0 ip=198.41.200.73
 2025-05-24T17:53:08Z ERR Failed to dial a quic connection error="failed to dial to edge with quic: timeout: no recent network activity" connIndex=0 event=0 ip=198.41.200.73
 2025-05-24T17:53:08Z INF Retrying connection in up to 4s connIndex=0 event=0 ip=198.41.200.73
+2025-05-24T17:53:10Z INF Using [CurveID(4588) CurveID(25497) CurveP256] as curve preferences connIndex=0 event=0 ip=198.41.192.57
