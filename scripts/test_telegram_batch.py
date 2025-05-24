@@ -1,63 +1,65 @@
+# scripts/test_telegram_batch_v2.py
+
 import os
 import asyncio
 import aiohttp
-import csv
-from pathlib import Path
 from dotenv import load_dotenv
 
-# Load .env
-env_path = Path(__file__).resolve().parents[1] / ".env"
-load_dotenv(dotenv_path=env_path)
+load_dotenv()
 
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-BOT_API = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
+BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
+CHAT_ID = os.getenv("TEST_CHAT_ID", "")  # Optional: Add your test chat ID to .env
 
-TEST_PROMPTS = [
-    "Is Thuya Brow Lamination in stock?",
-    "Tell me about Thuya Cleanser",
-    "Show me lash extension glue",
-    "Compare Thuya Cleanser and Noemi Cleanser",
-    "Thuya Brow Tint vs Noemi Henna",
-    "Tell me about bleach for eyebrows",
-    "What is the price of Noemi Lash Lift Kit?"
+if not BOT_TOKEN or not CHAT_ID:
+    raise Exception("❌ TELEGRAM_TOKEN or TEST_CHAT_ID missing in .env")
+
+# 🔁 Define test prompts for all categories
+test_queries = [
+    # Exact Match
+    "Thuya Brow Scrub 15ml",
+    "Sculptor Dye Oxidant",
+    "Katya Vinog Lash Lift Pads Silicone Shields",
+
+    # Brand-only
+    "Thuya",
+    "Sculptor",
+    "Lash Lift",
+    "Eyebrow scrub",
+
+    # Vague or misspelled
+    "thuya cleanser",
+    "thya cleenzer",
+    "brow laminating shampoo",
+    "lash foam cleaner",
+
+    # Unrelated
+    "dishwasher cream",
+    "vitamin supplement",
+    "serum for men",
+
+    # Long
+    "Tell me about all Thuya vegan products for lamination and brow coloring."
 ]
 
-CSV_LOG = "telegram_batch_test_log.csv"
-
-async def get_chat_id(session):
-    async with session.get(f"{BOT_API}/getUpdates") as resp:
-        data = await resp.json()
-        if "result" in data and len(data["result"]) > 0:
-            for entry in data["result"]:
-                try:
-                    return entry["message"]["chat"]["id"]
-                except KeyError:
-                    continue
-        return None
-
-async def send_and_log(session, chat_id, query, writer):
-    async with session.post(f"{BOT_API}/sendMessage", json={"chat_id": chat_id, "text": query}) as r1:
-        await asyncio.sleep(2)  # wait for response
-        async with session.get(f"{BOT_API}/getUpdates") as r2:
-            updates = await r2.json()
-            replies = [m for m in updates["result"] if m.get("message", {}).get("text") != query]
-            latest = replies[-1]["message"]["text"] if replies else "❌ No reply"
-            status = "✅" if latest and latest.lower() not in ["false", "❌ no reply"] else "❌"
-            print(f"{status} Sent: {query} → Response: {latest[:50]}")
-            writer.writerow([query, latest.strip(), status])
+async def send_message(session, text):
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": CHAT_ID,
+        "text": text,
+        "parse_mode": "HTML"
+    }
+    async with session.post(url, json=payload) as resp:
+        result = await resp.json()
+        if resp.status == 200 and result.get("ok"):
+            print(f"✅ Sent: {text[:40]}... → Success")
+        else:
+            print(f"❌ Failed: {text[:40]}... → {result}")
 
 async def main():
     async with aiohttp.ClientSession() as session:
-        chat_id = await get_chat_id(session)
-        if not chat_id:
-            print("❌ Could not determine chat_id. Please message the bot first.")
-            return
-
-        with open(CSV_LOG, mode="w", newline="", encoding="utf-8") as f:
-            writer = csv.writer(f)
-            writer.writerow(["Query", "Response", "Status"])
-            for query in TEST_PROMPTS:
-                await send_and_log(session, chat_id, query, writer)
+        for query in test_queries:
+            await send_message(session, query)
+            await asyncio.sleep(2)  # small delay to avoid rate limits
 
 if __name__ == "__main__":
     asyncio.run(main())
