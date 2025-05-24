@@ -313,49 +313,33 @@ def root():
 @app.post("/search-products")
 async def search_products_endpoint(data: ProductQuery):
     keywords = data.query.lower().split()
-    results = search_products_by_keywords(keywords, DB_PATH)
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT name, price, stock_status, brand FROM products")
+        all_products = cursor.fetchall()
+        conn.close()
 
-    if not results:
-        if model and tokenizer:
-            try:
-                prompt = f"### Instruction:\nThe user searched: '{data.query}'. Suggest what they might want.\n\n### Suggestion:"
-                inputs = tokenizer(
-                    prompt, return_tensors="pt", truncation=True, max_length=512
-                )
-                inputs = {k: v.to("cuda") for k, v in inputs.items()}
+        results_by_brand = defaultdict(list)
+        for name, price, stock, brand in all_products:
+            name_lower = name.lower()
+            match_score = max(difflib.SequenceMatcher(None, word, name_lower).ratio() for word in keywords)
+            if match_score > 0.5:
+                results_by_brand[brand].append({
+                    "name": name,
+                    "price": price,
+                    "stock": stock,
+                    "summary": "",
+                    "link": "#"
+                })
 
-                with torch.no_grad():
-                    start = time.time()
-
-                    output = model.generate(
-                        input_ids=inputs["input_ids"],
-                        attention_mask=inputs["attention_mask"],
-                        max_new_tokens=300,
-                        do_sample=False,
-                        temperature=0.7,
-                        top_p=0.95,
-                        pad_token_id=tokenizer.eos_token_id,
-                    )
-
-                    logger.info(f"🧠 Hermes response time: {time.time() - start:.2f}s")
-
-                reply = (
-                    tokenizer.decode(output[0], skip_special_tokens=True)
-                    .split("###")[-1]
-                    .strip()
-                )
-                return JSONResponse(
-                    content={"response": f"❌ No matching products found.\n\n🤖 Suggestion: {reply}"}
-                )
-            except Exception as e:
-                logger.error(f"LLM fallback failed: {e}")
-                return JSONResponse(
-                    content={"response": "❌ No matching products found. (Model failed to suggest alternative)"}
-                )
-
-        return JSONResponse(content={"response": "❌ No matching products found."})
-
-    return JSONResponse(content={"response": format_telegram_table(results)})
+        if results_by_brand:
+            return JSONResponse(content={"response": format_telegram_table(results_by_brand)})
+        else:
+            return JSONResponse(content={"response": "❌ No matching products found."})
+    except Exception as e:
+        logger.error(f"/search-products failed: {e}")
+        return JSONResponse(content={"response": "❌ Product search failed."})
 
 @app.post("/interpret")
 async def interpret_query(data: ProductQuery):
