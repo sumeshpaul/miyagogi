@@ -18,3 +18,14 @@ nohup: ignoring input
 2025-05-24T17:54:50Z INF Registered tunnel connection connIndex=2 connection=6b6fd90f-4015-47c4-bbef-58bc90c50e6a event=0 ip=198.41.192.77 location=dxb02 protocol=http2
 2025-05-24T17:54:52Z INF Registered tunnel connection connIndex=3 connection=e78da51e-53cc-4bee-8de1-6c92ac658d47 event=0 ip=198.41.200.33 location=ams17 protocol=http2
 2025-05-24T17:55:02Z INF Initiating graceful shutdown due to signal terminated ...
+2025-05-24T17:55:02Z INF Unregistered tunnel connection connIndex=0 event=0 ip=198.41.192.57
+2025-05-24T17:55:03Z INF Retrying connection in up to 1s connIndex=0 event=0 ip=198.41.192.57
+2025-05-24T17:55:03Z INF Unregistered tunnel connection connIndex=3 event=0 ip=198.41.200.33
+2025-05-24T17:55:03Z INF Unregistered tunnel connection connIndex=1 event=0 ip=198.41.200.23
+2025-05-24T17:55:03Z INF Unregistered tunnel connection connIndex=2 event=0 ip=198.41.192.77
+2025-05-24T17:55:03Z INF Retrying connection in up to 1s connIndex=2 event=0 ip=198.41.192.77
+2025-05-24T17:55:03Z INF Retrying connection in up to 1s connIndex=3 event=0 ip=198.41.200.33
+2025-05-24T17:55:03Z INF Retrying connection in up to 1s connIndex=1 event=0 ip=198.41.200.23
+2025-05-24T17:55:03Z ERR no more connections active and exiting
+2025-05-24T17:55:03Z INF Tunnel server stopped
+2025-05-24T17:55:03Z INF Metrics server stopped
