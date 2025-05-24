@@ -424,29 +424,29 @@ async def ask_hermes(
             name, price, stock = best_match
             stock_status = "✅ In stock" if stock == "instock" else "❌ Out of stock"
             db_context = (
-                f"<b>{html.escape(name)}</b> is priced at <b>AED {price}</b>.<br>"
-                f"Stock status: <b>{stock_status}</b>."
+                f"{name} is priced at AED {price}.\n"
+                f"Stock status: {stock_status}."
             )
             user_last_product_match[user_id] = name.lower()
             logger.info(f"✅ Injected product info for: {name}")
         elif suggestions:
             top = sorted(suggestions, key=lambda x: difflib.SequenceMatcher(None, query_text, x[0].lower()).ratio(), reverse=True)[:3]
-            suggestion_text = "<br>".join([
-                f"- {html.escape(n)} — AED {p} ({'✅ In stock' if s == 'instock' else '❌ Out of stock'})"
+            suggestion_text = "\n".join([
+                f"- {n} — AED {p} ({'✅ In stock' if s == 'instock' else '❌ Out of stock'})"
                 for n, p, s in top
             ])
-            db_context = f"I couldn't find an exact match for your query. Did you mean one of these?<br>{suggestion_text}"
+            db_context = f"I couldn't find an exact match. Did you mean:\n{suggestion_text}"
 
         conn.close()
 
     except Exception as e:
         logger.error(f"❌ Product DB fetch failed: {e}")
 
-    # Compose prompt
+    # 🧠 Compose Hermes prompt
     prompt = (
         "You are a friendly and knowledgeable beauty and skincare assistant named Aura. "
         "Your responses should be helpful, conversational, and gently persuasive."
-        + ("\nProduct Info:\n" + db_context.replace("<br>", "\n") if db_context else "")
+        + ("\nProduct Info:\n" + db_context if db_context else "")
     )
     for msg in messages:
         role = msg["role"].capitalize()
@@ -468,8 +468,8 @@ async def ask_hermes(
         decoded = tokenizer.decode(output[0], skip_special_tokens=True)
         answer = decoded.split("Assistant:")[-1].strip()
 
-        final_response = f"{db_context.strip()}<br><br>{html.escape(answer)}" if db_context else html.escape(answer)
-        final_response += "<br><br>" + random.choice([
+        final_response = f"{html.escape(db_context)}\n\n{html.escape(answer)}" if db_context else html.escape(answer)
+        final_response += "\n\n" + random.choice([
             "Let me know if you’d like personalized suggestions 😊",
             "I’m happy to help you find the perfect product 💬",
             "Feel free to ask for comparisons or recommendations anytime ✨"
@@ -487,7 +487,6 @@ async def ask_hermes(
     except Exception as e:
         logger.error(f"Hermes failed: {e}")
         return {"error": "Hermes failed."}
-
 # ─────────────────────────────── Bot Lifecycle ──────────────────────────────────
 @app.on_event("startup")
 async def startup():
