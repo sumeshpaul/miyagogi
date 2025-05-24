@@ -375,9 +375,6 @@ async def interpret_query(data: ProductQuery):
         logger.error(f"/interpret failed: {e}")
         return {"error": "Interpretation failed."}
 # ──────────────────────────────── /ask Endpoint for Hermes Chat (Improved) ─────────────────────────────
-from collections import defaultdict
-import random
-
 user_last_product_match = defaultdict(str)
 
 @app.post("/ask", response_model=Dict[str, str])
@@ -395,78 +392,41 @@ async def ask_hermes(
     is_price_question = any(word in query_text for word in price_related_keywords)
 
     db_context = ""
+    suggestions = []
     best_match = None
     brand_match = None
 
     try:
-        # Step 1: Determine reference text
-        recent_product_text = ""
-        if is_price_question:
-            if user_last_product_match[user_id]:
-                recent_product_text = user_last_product_match[user_id]
-            else:
-                for past_msg in reversed(user_chat_memory[user_id]):
-                    if past_msg["role"] == "user" and not any(kw in past_msg["content"].lower() for kw in price_related_keywords):
-                        recent_product_text = past_msg["content"].lower()
-                        break
-        else:
-            recent_product_text = query_text
-
-        # Step 2: Detect brand
-        for brand in ["thuya", "noemi", "fairy", "lash"]:
-            if brand in query_text:
-                brand_match = brand
-                break
-
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
+        cursor.execute("SELECT name, price, stock_status FROM products")
+        all_products = cursor.fetchall()
 
-        # Step 3: Try exact product match first
-        cursor.execute("SELECT LOWER(name) FROM products")
-        product_names = [row[0] for row in cursor.fetchall()]
-        best_score = 0
-        for pname in product_names:
-            score = difflib.SequenceMatcher(None, recent_product_text, pname).ratio()
+        best_score = 0.0
+        for name, price, stock in all_products:
+            score = difflib.SequenceMatcher(None, query_text, name.lower()).ratio()
             if score > best_score:
-                best_match = pname
                 best_score = score
+                best_match = (name, price, stock)
+            elif score > 0.4:
+                suggestions.append((name, price, stock))
 
-        if best_score > 0.5:
-            user_last_product_match[user_id] = best_match
-            cursor.execute("""
-                SELECT name, price, stock_status FROM products 
-                WHERE LOWER(name) LIKE ?
-                ORDER BY LENGTH(name) ASC LIMIT 1
-            """, (f"%{best_match}%",))
-            row = cursor.fetchone()
-            if row:
-                name, price, stock = row
-                stock_status = "✅ In stock" if stock == "instock" else "❌ Out of stock"
-                db_context = (
-                    f"<b>{html.escape(name)}</b> is priced at <b>AED {price}</b>.\n"
-                    f"Stock status: <b>{stock_status}</b>."
-                )
-                logger.info(f"✅ Injected product info for: {name}")
-
-        # Step 4: Fallback to bestsellers if nothing injected yet
-        if not db_context and brand_match:
-            cursor.execute("""
-                SELECT name, price, stock_status FROM products
-                WHERE LOWER(name) LIKE ?
-                ORDER BY LENGTH(name) ASC LIMIT 5
-            """, (f"%{brand_match}%",))
-            rows = cursor.fetchall()
-            seen = set()
-            filtered = []
-            for name, price, stock in rows:
-                if name.lower() not in seen and brand_match in name.lower():
-                    seen.add(name.lower())
-                    filtered.append((name, price, stock))
-            if filtered:
-                db_context = f"Here are some popular {brand_match.capitalize()} products:\n"
-                for name, price, stock in filtered:
-                    stock_status = "✅ In stock" if stock == "instock" else "❌ Out of stock"
-                    db_context += f"- {name} — AED {price} ({stock_status})\n"
+        if best_score > 0.65 and best_match:
+            name, price, stock = best_match
+            stock_status = "✅ In stock" if stock == "instock" else "❌ Out of stock"
+            db_context = (
+                f"<b>{html.escape(name)}</b> is priced at <b>AED {price}</b>.\n"
+                f"Stock status: <b>{stock_status}</b>."
+            )
+            user_last_product_match[user_id] = name.lower()
+            logger.info(f"✅ Injected product info for: {name}")
+        elif suggestions:
+            top = sorted(suggestions, key=lambda x: difflib.SequenceMatcher(None, query_text, x[0].lower()).ratio(), reverse=True)[:3]
+            suggestion_text = "\n".join([
+                f"- {html.escape(n)} — AED {p} ({'✅ In stock' if s == 'instock' else '❌ Out of stock'})"
+                for n, p, s in top
+            ])
+            db_context = f"I couldn't find an exact match for your query. Did you mean one of these?\n{suggestion_text}"
 
         conn.close()
 
@@ -499,11 +459,7 @@ async def ask_hermes(
         decoded = tokenizer.decode(output[0], skip_special_tokens=True)
         answer = decoded.split("Assistant:")[-1].strip()
 
-        if db_context:
-            final_response = f"{db_context.strip()}\n\n{html.escape(answer)}"
-        else:
-            final_response = html.escape(answer)
-
+        final_response = f"{db_context.strip()}\n\n{html.escape(answer)}" if db_context else html.escape(answer)
         final_response += "\n\n" + random.choice([
             "Let me know if you’d like personalized suggestions 😊",
             "I’m happy to help you find the perfect product 💬",
@@ -522,6 +478,7 @@ async def ask_hermes(
     except Exception as e:
         logger.error(f"Hermes failed: {e}")
         return {"error": "Hermes failed."}
+
 
 # ─────────────────────────────── Bot Lifecycle ──────────────────────────────────
 @app.on_event("startup")
