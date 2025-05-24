@@ -375,6 +375,9 @@ async def interpret_query(data: ProductQuery):
         logger.error(f"/interpret failed: {e}")
         return {"error": "Interpretation failed."}
 # ──────────────────────────────── /ask Endpoint for Hermes Chat (Improved) ─────────────────────────────
+from collections import defaultdict
+import random
+
 user_last_product_match = defaultdict(str)
 
 @app.post("/ask", response_model=Dict[str, str])
@@ -396,28 +399,20 @@ async def ask_hermes(
     brand_match = None
 
     try:
-        recent_product_text = query_text
-
-        # Use exact product match from query for price questions
+        # Step 1: Determine reference text
+        recent_product_text = ""
         if is_price_question:
-            conn = sqlite3.connect(DB_PATH)
-            cursor = conn.cursor()
-            cursor.execute("SELECT LOWER(name) FROM products")
-            product_names = [row[0] for row in cursor.fetchall()]
-            conn.close()
-
-            exact_match = next((p for p in product_names if p in query_text), None)
-            if exact_match:
-                recent_product_text = exact_match
-                user_last_product_match[user_id] = exact_match
-            elif user_last_product_match[user_id]:
+            if user_last_product_match[user_id]:
                 recent_product_text = user_last_product_match[user_id]
             else:
                 for past_msg in reversed(user_chat_memory[user_id]):
                     if past_msg["role"] == "user" and not any(kw in past_msg["content"].lower() for kw in price_related_keywords):
                         recent_product_text = past_msg["content"].lower()
                         break
+        else:
+            recent_product_text = query_text
 
+        # Step 2: Detect brand
         for brand in ["thuya", "noemi", "fairy", "lash"]:
             if brand in query_text:
                 brand_match = brand
@@ -426,53 +421,52 @@ async def ask_hermes(
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
 
-        if brand_match and not is_price_question:
+        # Step 3: Try exact product match first
+        cursor.execute("SELECT LOWER(name) FROM products")
+        product_names = [row[0] for row in cursor.fetchall()]
+        best_score = 0
+        for pname in product_names:
+            score = difflib.SequenceMatcher(None, recent_product_text, pname).ratio()
+            if score > best_score:
+                best_match = pname
+                best_score = score
+
+        if best_score > 0.5:
+            user_last_product_match[user_id] = best_match
+            cursor.execute("""
+                SELECT name, price, stock_status FROM products 
+                WHERE LOWER(name) LIKE ?
+                ORDER BY LENGTH(name) ASC LIMIT 1
+            """, (f"%{best_match}%",))
+            row = cursor.fetchone()
+            if row:
+                name, price, stock = row
+                stock_status = "✅ In stock" if stock == "instock" else "❌ Out of stock"
+                db_context = (
+                    f"<b>{html.escape(name)}</b> is priced at <b>AED {price}</b>.\n"
+                    f"Stock status: <b>{stock_status}</b>."
+                )
+                logger.info(f"✅ Injected product info for: {name}")
+
+        # Step 4: Fallback to bestsellers if nothing injected yet
+        if not db_context and brand_match:
             cursor.execute("""
                 SELECT name, price, stock_status FROM products
                 WHERE LOWER(name) LIKE ?
-                ORDER BY LENGTH(name) ASC
-                LIMIT 5
+                ORDER BY LENGTH(name) ASC LIMIT 5
             """, (f"%{brand_match}%",))
             rows = cursor.fetchall()
-            if rows:
-                seen = set()
-                filtered = []
-                for name, price, stock in rows:
-                    if name not in seen and brand_match in name.lower():
-                        seen.add(name)
-                        filtered.append((name, price, stock))
-                if filtered:
-                    db_context = f"Here are some popular {brand_match.capitalize()} products:\n"
-                    for name, price, stock in filtered:
-                        stock_status = "✅ In stock" if stock == "instock" else "❌ Out of stock"
-                        db_context += f"- {name} — AED {price} ({stock_status})\n"
-        else:
-            cursor.execute("SELECT LOWER(name) FROM products")
-            product_names = [row[0] for row in cursor.fetchall()]
-            best_score = 0
-            for pname in product_names:
-                score = difflib.SequenceMatcher(None, recent_product_text, pname).ratio()
-                if score > best_score:
-                    best_match = pname
-                    best_score = score
-
-            if best_score > 0.5:
-                user_last_product_match[user_id] = best_match
-                cursor.execute("""
-                    SELECT name, price, stock_status FROM products 
-                    WHERE LOWER(name) LIKE ?
-                    ORDER BY LENGTH(name) ASC
-                    LIMIT 1
-                """, (f"%{best_match}%",))
-                row = cursor.fetchone()
-                if row:
-                    name, price, stock = row
+            seen = set()
+            filtered = []
+            for name, price, stock in rows:
+                if name.lower() not in seen and brand_match in name.lower():
+                    seen.add(name.lower())
+                    filtered.append((name, price, stock))
+            if filtered:
+                db_context = f"Here are some popular {brand_match.capitalize()} products:\n"
+                for name, price, stock in filtered:
                     stock_status = "✅ In stock" if stock == "instock" else "❌ Out of stock"
-                    db_context = (
-                        f"<b>{html.escape(name)}</b> is priced at <b>AED {price}</b>.\n"
-                        f"Stock status: <b>{stock_status}</b>."
-                    )
-                    logger.info(f"✅ Injected product info for: {name}")
+                    db_context += f"- {name} — AED {price} ({stock_status})\n"
 
         conn.close()
 
