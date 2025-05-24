@@ -1,17 +1,18 @@
-# scripts/test_telegram_batch.py
-
-import asyncio
 import os
+import asyncio
 import aiohttp
+import csv
+from pathlib import Path
 from dotenv import load_dotenv
 
-# Load .env file from project root
-load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '..', '.env'))
+# Load .env
+env_path = Path(__file__).resolve().parents[1] / ".env"
+load_dotenv(dotenv_path=env_path)
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-BASE_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
+BOT_API = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
 
-TEST_QUERIES = [
+TEST_PROMPTS = [
     "Is Thuya Brow Lamination in stock?",
     "Tell me about Thuya Cleanser",
     "Show me lash extension glue",
@@ -21,34 +22,42 @@ TEST_QUERIES = [
     "What is the price of Noemi Lash Lift Kit?"
 ]
 
-async def get_latest_chat_id():
-    async with aiohttp.ClientSession() as session:
-        async with session.get(f"{BASE_URL}/getUpdates") as resp:
-            data = await resp.json()
-            results = data.get("result", [])
-            if results:
-                return results[-1]["message"]["chat"]["id"]
-            return None
+CSV_LOG = "telegram_batch_test_log.csv"
 
-async def send_message(session, text, chat_id):
-    payload = {
-        "chat_id": chat_id,
-        "text": text,
-        "parse_mode": "HTML"
-    }
-    async with session.post(f"{BASE_URL}/sendMessage", json=payload) as resp:
+async def get_chat_id(session):
+    async with session.get(f"{BOT_API}/getUpdates") as resp:
         data = await resp.json()
-        ok = data.get("ok", False)
-        print(f"✅ Sent: {text[:40]}... → Response: {ok}")
+        if "result" in data and len(data["result"]) > 0:
+            for entry in data["result"]:
+                try:
+                    return entry["message"]["chat"]["id"]
+                except KeyError:
+                    continue
+        return None
 
-async def batch_send():
-    chat_id = await get_latest_chat_id()
-    if not chat_id:
-        print("❌ Could not determine chat_id. Make sure you've messaged the bot.")
-        return
+async def send_and_log(session, chat_id, query, writer):
+    async with session.post(f"{BOT_API}/sendMessage", json={"chat_id": chat_id, "text": query}) as r1:
+        await asyncio.sleep(2)  # wait for response
+        async with session.get(f"{BOT_API}/getUpdates") as r2:
+            updates = await r2.json()
+            replies = [m for m in updates["result"] if m.get("message", {}).get("text") != query]
+            latest = replies[-1]["message"]["text"] if replies else "❌ No reply"
+            status = "✅" if latest and latest.lower() not in ["false", "❌ no reply"] else "❌"
+            print(f"{status} Sent: {query} → Response: {latest[:50]}")
+            writer.writerow([query, latest.strip(), status])
+
+async def main():
     async with aiohttp.ClientSession() as session:
-        tasks = [send_message(session, query, chat_id) for query in TEST_QUERIES]
-        await asyncio.gather(*tasks)
+        chat_id = await get_chat_id(session)
+        if not chat_id:
+            print("❌ Could not determine chat_id. Please message the bot first.")
+            return
+
+        with open(CSV_LOG, mode="w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(["Query", "Response", "Status"])
+            for query in TEST_PROMPTS:
+                await send_and_log(session, chat_id, query, writer)
 
 if __name__ == "__main__":
-    asyncio.run(batch_send())
+    asyncio.run(main())
