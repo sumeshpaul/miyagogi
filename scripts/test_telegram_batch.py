@@ -12,21 +12,42 @@ CHAT_ID = "715037900"  # Your Telegram chat ID
 SEND_URL = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
 LOGS_URL = "http://localhost:8001/recent-logs?limit=100"
 
-queries = [
-    "Thuya cleanser",
-    "Thuya Brow Scrub 15ml",
-    "Sculptor Dye Oxidant",
-    "lash foam cleaner",
-    "thuya shampoo",
-    "lash lift glue",
-    "Noemi pads",
-    "brow lamination Thuya vegan",
-    "serum for men",
-    "dishwashing cream"
-]
 
 timestamp_sent = datetime.utcnow().isoformat()
 print("🚀 Sending queries...")
+
+queries = [
+    "Thuya Brow Lamination Kit",
+    "Thuya Perming Kit",
+    "Thuya Cleanser",
+    "Thuya White Contour Paste",
+    "Thuya Silicone Shields",
+    "Thuya Eyebrow Henna Color",
+    "Thuya Eyelash Dye Oxidant",
+    "Thuya Tint Remover",
+    "Thuya Vegan Lash Lift Kit",
+    "Thuya Neutralizer Cream",
+    "Sculptor Eyelash Glue",
+    "Sculptor Brow Scrub",
+    "Sculptor Lash Lifting Cream",
+    "Noemi Eyelash Lamination Pads",
+    "Noemi Vegan Lash Dye",
+    "Noemi Lifting Tool",
+    "Noemi Cleanser Pads",
+    "Noemi Keratin Booster",
+    "Lashgo Lash Lift Glue",
+    "Lashgo Neutralizing Lotion",
+    "Lashgo Silicone Pads",
+    "Lashgo Perming Solution",
+    "Enigma Lash Foam Cleanser",
+    "Enigma Lash Lift Kit",
+    "Enigma Oil-Free Remover",
+    "Viktoria Brow Sculpting Paste",
+    "Viktoria Lamination Cream",
+    "Viktoria Brow Conditioner",
+    "Revitabrow Eyebrow Serum",
+    "Revitabrow Conditioner"
+]
 
 async def send_query(session, query):
     payload = {
