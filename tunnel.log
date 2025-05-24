@@ -14,3 +14,5 @@ nohup: ignoring input
 2025-05-24T17:54:49Z INF ICMP proxy will use fe80::90c6:6701:682a:ed02 in zone wlp131s0 as source for IPv6
 2025-05-24T17:54:49Z INF Starting metrics server on 127.0.0.1:20242/metrics
 2025-05-24T17:54:49Z INF Registered tunnel connection connIndex=0 connection=75aa6afc-fc26-4cf1-85f8-3e039121b3c8 event=0 ip=198.41.192.57 location=dxb02 protocol=http2
+2025-05-24T17:54:50Z INF Registered tunnel connection connIndex=1 connection=abf3d2ee-c27f-43c2-a6d0-9b01d1ff5712 event=0 ip=198.41.200.23 location=ams01 protocol=http2
+2025-05-24T17:54:50Z INF Registered tunnel connection connIndex=2 connection=6b6fd90f-4015-47c4-bbef-58bc90c50e6a event=0 ip=198.41.192.77 location=dxb02 protocol=http2
