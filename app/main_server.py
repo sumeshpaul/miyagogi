@@ -394,6 +394,7 @@ async def ask_hermes(data: ProductQuery, user_id: str = Query(...)):
         all_products = cursor.fetchall()
         conn.close()
 
+        # Primary fuzzy match
         for name, price, stock in all_products:
             name_norm = normalize(name)
             score = difflib.SequenceMatcher(None, query_norm, name_norm).ratio()
@@ -403,33 +404,35 @@ async def ask_hermes(data: ProductQuery, user_id: str = Query(...)):
                 best_score = score
                 best_match = (name, price, stock)
 
+        # Inject best match if strong enough
         if best_score > 0.62:
             name, price, stock = best_match
             stock_status = "in stock" if stock == "instock" else "out of stock"
-            product_sentence = f"The *{name}* is priced at AED {price} and it's currently {stock_status}."
+            product_sentence = f"The {name} is priced at AED {price} and it's currently {stock_status}."
             user_last_product_match[user_id] = name.lower()
             source_tag = "\n\n_Source: DB_"
-            logger.info(f"✅ Matched product: {name}")
         elif user_last_product_match.get(user_id):
+            # Memory fallback
             last = user_last_product_match[user_id]
             for name, price, stock in all_products:
                 if last in name.lower():
                     stock_status = "in stock" if stock == "instock" else "out of stock"
-                    product_sentence = f"You're asking about *{name}*. It's AED {price} and currently {stock_status}."
+                    product_sentence = f"You're asking about {name}. It's AED {price} and currently {stock_status}."
                     source_tag = "\n\n_Source: Memory_"
                     break
         else:
-            return {"response": "I couldn't find this product. Could you try a keyword like 'Thuya cleanser' or 'Noemi dye'?"}
+            # Clarification
+            return {"response": "I couldn’t find this product in our catalog. Could you try rephrasing or mention a brand like 'Thuya' or 'Noemi'?"}
 
     except Exception as e:
         logger.error(f"❌ DB error: {e}")
-        return {"response": "Sorry, I had trouble accessing product details. Please try again."}
+        return {"response": "Sorry, I had trouble accessing product details. Please try again shortly."}
 
-    # Compose LLM prompt
+    # 🧠 LLM Prompt
     prompt = (
-        "You are Aura, a helpful and knowledgeable assistant at Miyagogi.\n"
-        "Start by confirming the product name, price, and stock as provided below.\n"
-        "Answer naturally like you're talking to a real customer.\n\n"
+        "You are Aura, a kind and knowledgeable beauty assistant working at Miyagogi.\n"
+        "Start by sharing the product name, price, and stock status clearly.\n"
+        "Be concise, friendly, and do not hallucinate other products or prices.\n\n"
         f"Product Info: {product_sentence}\n"
     )
     for msg in messages:
@@ -453,9 +456,9 @@ async def ask_hermes(data: ProductQuery, user_id: str = Query(...)):
 
         final_response = f"{product_sentence}\n\n{answer}{source_tag}"
         final_response += "\n\n" + random.choice([
-            "Let me know if you'd like a tailored recommendation 😊",
+            "Let me know if you'd like help choosing the best option 😊",
             "I can help you compare similar items if you'd like 💬",
-            "Happy to help you choose the best option ✨"
+            "Happy to assist with any other product too ✨"
         ])
 
         user_chat_memory[user_id].append({"role": "user", "content": query_text})
@@ -468,7 +471,6 @@ async def ask_hermes(data: ProductQuery, user_id: str = Query(...)):
     except Exception as e:
         logger.error(f"❌ Hermes error: {e}")
         return {"error": "Hermes model failed."}
-
 # ─────────────────────────────── Bot Lifecycle ──────────────────────────────────
 @app.on_event("startup")
 async def startup():
