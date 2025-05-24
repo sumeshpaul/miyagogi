@@ -329,7 +329,7 @@ async def search_products_endpoint(data: ProductQuery):
         if results_by_brand:
             return JSONResponse(content={"response": format_telegram_table(results_by_brand)})
         else:
-            return JSONResponse(content={"response": "❌ No matching products found."})
+            return JSONResponse(content={"response": ""})
     except Exception as e:
         logger.error(f"/search-products failed: {e}")
         return JSONResponse(content={"response": "❌ Product search failed."})
