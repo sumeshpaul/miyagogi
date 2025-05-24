@@ -154,21 +154,23 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 interpreted = await resp.json()
                 keywords = interpreted.get("keywords", query)
 
-            # 📦 Step 2: Try structured product search
+            # 📦 Step 2: Try structured product search (preferred)
             async with session.post("http://localhost:8000/search-products", json={"query": keywords}) as resp:
                 result = await resp.json()
                 search_text = result.get("response", "")
 
-            # 💬 Step 3: Always fetch LLM-enhanced response
-            async with session.post(f"http://localhost:8000/ask?user_id={user_id}", json={"query": query}) as chat_resp:
-                chat_result = await chat_resp.json()
-                chat_text = chat_result.get("response", "")
+            # 💬 Step 3: Fallback to LLM-enhanced response only if DB fails
+            chat_text = ""
+            if not search_text or "No matching products" in search_text:
+                async with session.post(f"http://localhost:8000/ask?user_id={user_id}", json={"query": query}) as chat_resp:
+                    chat_result = await chat_resp.json()
+                    chat_text = chat_result.get("response", "")
 
-            # ✅ FINAL RESPONSE PRIORITY
-            if chat_text:
-                reply_text = chat_text
-            elif search_text and "No matching products" not in search_text:
+            # ✅ FINAL PRIORITY LOGIC
+            if search_text and "No matching products" not in search_text:
                 reply_text = search_text
+            elif chat_text:
+                reply_text = chat_text
             else:
                 reply_text = "❌ No relevant products or insights found."
 
@@ -185,7 +187,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # 📊 Log interaction
     log_query(user_id, query, reply_text)
-
 # ──────────────────────────────── API Endpoints ─────────────────────────────────
 @app.get("/recent-logs", response_model=List[LogEntry])
 def recent_logs(limit: int = Query(10)):
