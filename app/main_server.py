@@ -300,7 +300,6 @@ def export_logs():
 def root():
     return {"message": "Miyagogi Bot v1 with Hermes is running"}
 
-
 @app.post("/search-products")
 async def search_products_endpoint(data: ProductQuery):
     keywords = data.query.lower().split()
@@ -329,23 +328,24 @@ async def search_products_endpoint(data: ProductQuery):
                     )
 
                     logger.info(f"🧠 Hermes response time: {time.time() - start:.2f}s")
+
                 reply = (
                     tokenizer.decode(output[0], skip_special_tokens=True)
                     .split("###")[-1]
                     .strip()
                 )
-                return {
-                    "response": f"❌ No matching products found.\n\n🤖 Suggestion: {reply}"
-                }
+                return JSONResponse(
+                    content={"response": f"❌ No matching products found.\n\n🤖 Suggestion: {reply}"}
+                )
             except Exception as e:
                 logger.error(f"LLM fallback failed: {e}")
-                return {
-                    "response": "❌ No matching products found. (Model failed to suggest alternative)"
-                }
+                return JSONResponse(
+                    content={"response": "❌ No matching products found. (Model failed to suggest alternative)"}
+                )
 
-        return {"response": "❌ No matching products found."}
+        return JSONResponse(content={"response": "❌ No matching products found."})
 
-    return {"response": format_telegram_table(results)}
+    return JSONResponse(content={"response": format_telegram_table(results)})
 
 @app.post("/interpret")
 async def interpret_query(data: ProductQuery):
