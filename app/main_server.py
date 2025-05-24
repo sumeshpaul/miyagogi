@@ -154,20 +154,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 interpreted = await resp.json()
                 keywords = interpreted.get("keywords", query)
 
-            # 📦 Step 2: Try structured product search (preferred)
+            # 📦 Step 2: Try structured product search
             async with session.post("http://localhost:8000/search-products", json={"query": keywords}) as resp:
                 result = await resp.json()
                 search_text = result.get("response", "")
 
-            # 💬 Step 3: Fallback to LLM-enhanced response only if DB fails
+            # 🧠 Step 3: Always ask Hermes for natural language context
             chat_text = ""
-            if not search_text or "No matching products" in search_text:
-                async with session.post(f"http://localhost:8000/ask?user_id={user_id}", json={"query": query}) as chat_resp:
-                    chat_result = await chat_resp.json()
-                    chat_text = chat_result.get("response", "")
+            async with session.post(f"http://localhost:8000/ask?user_id={user_id}", json={"query": query}) as chat_resp:
+                chat_result = await chat_resp.json()
+                chat_text = html.unescape(chat_result.get("response", ""))
 
-            # ✅ FINAL PRIORITY LOGIC
-            if search_text and "No matching products" not in search_text:
+            # ✅ FINAL PRIORITY LOGIC: Combine both results
+            if search_text and chat_text:
+                reply_text = f"{search_text}\n\n<b>AI Insight:</b>\n{chat_text}"
+            elif search_text:
                 reply_text = search_text
             elif chat_text:
                 reply_text = chat_text
@@ -177,7 +178,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             reply_text = f"❌ Error: {str(e)}"
 
-    # 🧾 Chunk large responses
+    # 📤 Chunk response if too long
+    MAX_MESSAGE_LENGTH = 4000
     if len(reply_text) > MAX_MESSAGE_LENGTH:
         chunks = [reply_text[i:i + MAX_MESSAGE_LENGTH] for i in range(0, len(reply_text), MAX_MESSAGE_LENGTH)]
         for chunk in chunks:
@@ -185,7 +187,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text(reply_text, parse_mode=ParseMode.HTML)
 
-    # 📊 Log interaction
+    # 🧾 Log interaction
     log_query(user_id, query, reply_text)
 # ──────────────────────────────── API Endpoints ─────────────────────────────────
 @app.get("/recent-logs", response_model=List[LogEntry])
