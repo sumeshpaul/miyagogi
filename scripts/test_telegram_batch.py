@@ -3,14 +3,14 @@
 import aiohttp
 import asyncio
 import csv
-from datetime import datetime
 import time
+from datetime import datetime
+import html
 
 BOT_TOKEN = "7987599734:AAGJPPAwNo6lzlUxB6PenofWCPXKZ_u6t_0"
-CHAT_ID = "715037900"
+CHAT_ID = "715037900"  # Your Telegram chat ID
 SEND_URL = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-GET_UPDATES_URL = f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates"
-LOG_FILE = "batch_test_log.csv"
+LOGS_URL = "http://localhost:8000/recent-logs?limit=100"
 
 queries = [
     "Thuya cleanser",
@@ -25,48 +25,63 @@ queries = [
     "dishwashing cream"
 ]
 
-# Helper: Get all recent messages from Telegram
-async def fetch_replies():
-    async with aiohttp.ClientSession() as session:
-        async with session.get(GET_UPDATES_URL) as resp:
-            return await resp.json()
+timestamp_sent = datetime.utcnow().isoformat()
+print("🚀 Sending queries...")
 
-# Helper: Send message and wait briefly
-async def send_and_wait(session, query):
-    payload = {"chat_id": CHAT_ID, "text": query}
+async def send_query(session, query):
+    payload = {
+        "chat_id": CHAT_ID,
+        "text": query
+    }
     async with session.post(SEND_URL, json=payload) as resp:
         result = await resp.json()
-        status = "✅ Sent" if result.get("ok") else "❌ Failed"
-        desc = "" if result.get("ok") else result.get("description", "Unknown error")
-        print(f"{status}: {query[:30]}... {desc}")
-        return query, status, desc
+        if not result.get("ok"):
+            print(f"❌ Failed: {query[:30]}... → {result}")
+        else:
+            print(f"✅ Sent: {query[:30]}...")
 
-# Main orchestration
-async def main():
-    print("🚀 Sending queries...")
+async def send_all():
     async with aiohttp.ClientSession() as session:
-        tasks = [send_and_wait(session, q) for q in queries]
-        results = await asyncio.gather(*tasks)
+        tasks = [send_query(session, q) for q in queries]
+        await asyncio.gather(*tasks)
 
-    print("⏳ Waiting for bot replies...")
-    await asyncio.sleep(10)  # ⏱ Wait for replies to be generated
+asyncio.run(send_all())
 
-    replies_raw = await fetch_replies()
-    all_messages = replies_raw.get("result", [])
+print("⏳ Waiting for bot replies...")
+time.sleep(8)  # wait for bot to respond
 
-    # Match each query to a reply
-    latest_replies = {msg["message"]["text"]: msg["message"].get("reply_to_message", {}).get("text", "") for msg in all_messages if "message" in msg and "text" in msg["message"]}
+print("📥 Fetching replies from /recent-logs...")
+async def fetch_logs():
+    async with aiohttp.ClientSession() as session:
+        async with session.get(LOGS_URL) as resp:
+            return await resp.json()
 
-    print("🧾 Logging results to CSV...")
-    with open(LOG_FILE, "w", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(["Timestamp", "Query", "Status", "Bot Reply"])
-        for query, status, desc in results:
-            timestamp = datetime.utcnow().isoformat()
-            reply = next((m["message"]["text"] for m in all_messages if m["message"].get("reply_to_message", {}).get("text", "") == query), "— Not found —") if status == "✅ Sent" else desc
-            writer.writerow([timestamp, query, status, reply])
+logs = asyncio.run(fetch_logs())
 
-    print(f"✅ Done. Log saved to {LOG_FILE}")
+print("🧾 Logging results to CSV...")
+rows = []
 
-if __name__ == "__main__":
-    asyncio.run(main())
+# Prepare a reply lookup dictionary
+log_lookup = {}
+for entry in logs:
+    if entry["timestamp"] > timestamp_sent and entry["user_id"] == CHAT_ID:
+        query = entry["query"]
+        response = html.unescape(entry["response"])
+        log_lookup[query.strip().lower()] = response.strip()
+
+for q in queries:
+    q_normalized = q.strip().lower()
+    response = log_lookup.get(q_normalized, "— Not found —")
+    rows.append({
+        "Timestamp": timestamp_sent,
+        "Query": q,
+        "Status": "✅ Sent",
+        "Bot Reply": response
+    })
+
+with open("batch_test_log.csv", "w", newline='', encoding="utf-8") as f:
+    writer = csv.DictWriter(f, fieldnames=["Timestamp", "Query", "Status", "Bot Reply"])
+    writer.writeheader()
+    writer.writerows(rows)
+
+print("✅ Done. Log saved to batch_test_log.csv")
