@@ -1,0 +1,37 @@
+# Bytecode and compiled files
+__pycache__/
+*.py[cod]
+*.so
+
+# IDE and dev environments
+.venv/
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Node/JS artifacts
+node_modules/
+
+# Python packaging leftovers
+build/
+dist/
+*.egg-info/
+
+# Logs and caches
+*.log
+*.sqlite
+output/
+.cache/
+*.tar
+*.tar.gz
+*.whl
+*.tar.xz
+
+# Model checkpoints (only exclude if auto-regenerated or mounted manually)
+checkpoints/
+backups/
+rag_data/geology/faiss_index/
+
+# Exclude secrets
+.env

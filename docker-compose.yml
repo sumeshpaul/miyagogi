@@ -1,0 +1,14 @@
+services:
+  miyagogi-bot:
+    container_name: miyagogi-bot
+    build: .
+    env_file: .env
+    volumes:
+      - ./data:/app/data
+      - ./final_lora_model_v2:/app/final_lora_model_v2
+      - ./base_model:/app/base_model          # ✅ Mount base model here
+    ports:
+      - "8001:8000"
+      - "7863:7863"
+    restart: unless-stopped
+    runtime: nvidia
