@@ -364,6 +364,7 @@ async def interpret_query(data: ProductQuery):
         return {"error": "Interpretation failed."}
 
 # ──────────────────────────────── /ask Endpoint for Hermes Chat (Improved) ─────────────────────────────
+# ✅ Enhanced /ask Endpoint with Soft Fallback + Improved Human Tone
 user_last_product_match = defaultdict(str)
 
 @app.post("/ask", response_model=Dict[str, str])
@@ -394,40 +395,39 @@ async def ask_hermes(
             if score > best_score:
                 best_score = score
                 best_match = (name, price, stock)
-            elif 0.45 < score < 0.65:
+            elif score > 0.45:
                 suggestions.append((name, price, stock))
 
         if best_score > 0.68 and best_match:
             name, price, stock = best_match
-            stock_status = "✅ In stock" if stock == "instock" else "❌ Out of stock"
-            db_context = (
-                f"{name} is priced at AED {price}.\n"
-                f"Stock status: {stock_status}."
-            )
+            stock_status = "✅ In stock" if stock == "instock" else "Out of stock"
+            db_context = f"{name} is priced at AED {price}.\nStock status: {stock_status}."
             user_last_product_match[user_id] = name.lower()
             logger.info(f"✅ Injected product info for: {name}")
+
         elif suggestions:
             top = sorted(suggestions, key=lambda x: difflib.SequenceMatcher(None, query_text, x[0].lower()).ratio(), reverse=True)[:3]
             suggestion_text = "\n".join([
-                f"- {n} — AED {p} ({'✅ In stock' if s == 'instock' else '❌ Out of stock'})"
+                f"- {n} — AED {p} ({'In stock' if s == 'instock' else 'Out of stock'})"
                 for n, p, s in top
             ])
-            db_context = f"I couldn't find an exact match. Did you mean:\n{suggestion_text}"
+            db_context = f"I couldn't find an exact match, but here are some similar options:\n{suggestion_text}"
 
         conn.close()
 
     except Exception as e:
         logger.error(f"❌ Product DB fetch failed: {e}")
 
-    # 🧠 Compose Hermes prompt
+    # 🧠 Compose LLM Prompt
     prompt = (
-        "You are a friendly and knowledgeable beauty and skincare assistant named Aura. "
-        "Your responses should be helpful, conversational, and gently persuasive."
-        + ("\nProduct Info:\n" + db_context if db_context else "")
+        "You are Aura, a knowledgeable and kind beauty assistant at Miyagogi.\n"
+        "Respond clearly and helpfully, starting with available product information.\n"
+        "If there's no exact match, offer helpful suggestions."
     )
+    if db_context:
+        prompt += f"\n\nProduct Info:\n{db_context}"
     for msg in messages:
-        role = msg["role"].capitalize()
-        prompt += f"\n{role}: {msg['content']}"
+        prompt += f"\n{msg['role'].capitalize()}: {msg['content']}"
     prompt += "\nAssistant:"
 
     try:
@@ -447,9 +447,9 @@ async def ask_hermes(
 
         final_response = f"{html.escape(db_context)}\n\n{html.escape(answer)}" if db_context else html.escape(answer)
         final_response += "\n\n" + random.choice([
-            "Let me know if you’d like personalized suggestions 😊",
-            "I’m happy to help you find the perfect product 💬",
-            "Feel free to ask for comparisons or recommendations anytime ✨"
+            "Let me know if you'd like a tailored recommendation 😊",
+            "I can help you compare different options if you'd like 💬",
+            "Happy to guide you to the perfect product ✨"
         ])
 
         user_chat_memory[user_id].append({"role": "user", "content": data.query})
