@@ -173,15 +173,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 chat_result = await chat_resp.json()
                 chat_text = html.unescape(chat_result.get("response", ""))
 
-            # ✅ FINAL PRIORITY LOGIC: Combine both results
-            if search_text and chat_text:
-                reply_text = f"{search_text}\n\n<b>AI Insight:</b>\n{chat_text}"
-            elif search_text:
-                reply_text = search_text
-            elif chat_text:
-                reply_text = chat_text
-            else:
-                reply_text = "❌ No relevant products or insights found."
+           # ✅ FINAL PRIORITY LOGIC: Combine both results
+           if search_text.strip().startswith("❌ No matching products found."):
+               reply_text = chat_text  # Don't include empty search dump
+           elif search_text and chat_text:
+               reply_text = f"{search_text}\n\n<b>AI Insight:</b>\n{chat_text}"
+           elif search_text:
+               reply_text = search_text
+           elif chat_text:
+               reply_text = chat_text
+           else:
+               reply_text = "❌ No relevant products or insights found."
 
         except Exception as e:
             reply_text = f"❌ Error: {str(e)}"
