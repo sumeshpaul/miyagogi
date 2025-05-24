@@ -23,3 +23,4 @@ sentence-transformers
 woocommerce
 rapidfuzz>=3.0.0
 python-telegram-bot
+aiohttp
