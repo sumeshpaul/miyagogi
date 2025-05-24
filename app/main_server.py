@@ -1,33 +1,41 @@
 # app/main_server.py
-
+# Standard Library
 import os
-import logging
-from pathlib import Path
-from fastapi import FastAPI, Request, Query, Body
-from telegram import Update
-from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filters
-from woocommerce import API
-import sqlite3
-import textwrap
-from dotenv import load_dotenv
-from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
-import torch
-import difflib
-from telegram.constants import ParseMode
-from fastapi.responses import JSONResponse, StreamingResponse
-from typing import List, Dict
-from pydantic import BaseModel
-import aiohttp
-from search_products import search_products_by_keywords
-from peft import PeftModel
-import html
 import csv
-from collections import defaultdict
 import time
+import html
+import sqlite3
+import random
+import logging
+import textwrap
+from pathlib import Path
+from collections import defaultdict
+
+# ───────────────────────────────────────────────
+# Third-Party Packages
+import torch
+import aiohttp
+import difflib
 import gradio as gr
 import uvicorn
-import random
-from typing import Dict
+from dotenv import load_dotenv
+from pydantic import BaseModel
+from typing import List, Dict
+from fastapi import FastAPI, Request, Query, Body
+from fastapi.responses import JSONResponse, StreamingResponse
+from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
+from peft import PeftModel
+
+# ───────────────────────────────────────────────
+# Telegram Bot Framework
+from telegram import Update
+from telegram.constants import ParseMode
+from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filters
+
+# ───────────────────────────────────────────────
+# External APIs and Business Logic
+from woocommerce import API
+from search_products import search_products_by_keywords
 
 # ──────────────────────────── Logging & Environment ─────────────────────────────
 logging.basicConfig(level=logging.INFO)
