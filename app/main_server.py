@@ -10,6 +10,7 @@ import logging
 import textwrap
 from pathlib import Path
 from collections import defaultdict
+user_last_product_match = defaultdict(str)
 
 # ───────────────────────────────────────────────
 # Third-Party Packages
@@ -364,21 +365,27 @@ async def interpret_query(data: ProductQuery):
         return {"error": "Interpretation failed."}
 
 # ──────────────────────────────── /ask Endpoint for Hermes Chat (Improved) ─────────────────────────────
+
 @app.post("/ask", response_model=Dict[str, str])
-async def ask_hermes(
-    data: ProductQuery, user_id: str = Query(..., description="Telegram user ID")
-):
-    if not model or not tokenizer:
-        return {"error": "Hermes model not available."}
+async def ask_hermes(data: ProductQuery, user_id: str = Query(...)):
+    import re
+    import difflib
 
-    query_text = data.query.strip().lower()
+    def normalize(text):
+        text = text.lower()
+        text = re.sub(r'\(.*?\)', '', text)
+        text = re.sub(r'\b(ml|g|pairs|kit|pcs|pack|sachet|10ml|20ml|150ml|15ml|30ml|8 pairs)\b', '', text)
+        text = re.sub(r'[^a-z0-9\s]', '', text)
+        return text.strip()
+
+    query_text = data.query.strip()
+    query_norm = normalize(query_text)
     messages = user_chat_memory[user_id][-MEMORY_MAX_TURNS:]
-    messages.append({"role": "user", "content": data.query})
-
-    db_context = ""
-    source_tag = ""
-    suggestions = []
+    messages.append({"role": "user", "content": query_text})
     best_match = None
+    best_score = 0.0
+    product_sentence = ""
+    source_tag = ""
 
     try:
         conn = sqlite3.connect(DB_PATH)
@@ -387,67 +394,47 @@ async def ask_hermes(
         all_products = cursor.fetchall()
         conn.close()
 
-        best_score = 0.0
         for name, price, stock in all_products:
-            name_lower = name.lower()
-            ratio_score = difflib.SequenceMatcher(None, query_text, name_lower).ratio()
-            contains_score = 0.85 if query_text in name_lower else 0
-            score = max(ratio_score, contains_score)
-
+            name_norm = normalize(name)
+            score = difflib.SequenceMatcher(None, query_norm, name_norm).ratio()
+            if query_norm in name_norm:
+                score += 0.4
             if score > best_score:
                 best_score = score
                 best_match = (name, price, stock)
-            elif score > 0.45:
-                suggestions.append((name, price, stock))
 
-        if best_score > 0.68 and best_match:
+        if best_score > 0.62:
             name, price, stock = best_match
-            stock_status = "✅ In stock" if stock == "instock" else "❌ Out of stock"
-            db_context = (
-                f"| Name | Price | Stock |\n"
-                f"|------|-------|-------|\n"
-                f"| {name} | AED {price} | {stock_status} |"
-            )
+            stock_status = "in stock" if stock == "instock" else "out of stock"
+            product_sentence = f"The *{name}* is priced at AED {price} and it's currently {stock_status}."
             user_last_product_match[user_id] = name.lower()
             source_tag = "\n\n_Source: DB_"
-            logger.info(f"✅ Injected product info for: {name}")
-
-        elif suggestions:
-            top = sorted(suggestions, key=lambda x: difflib.SequenceMatcher(None, query_text, x[0].lower()).ratio(), reverse=True)[:3]
-            suggestion_text = "\n".join([
-                f"- {n} — AED {p} ({'In stock' if s == 'instock' else 'Out of stock'})"
-                for n, p, s in top
-            ])
-            db_context = f"I couldn't find an exact match, but here are some similar options:\n{suggestion_text}"
-            source_tag = "\n\n_Source: Suggestions_"
-
-        elif user_last_product_match[user_id]:
-            fallback_name = user_last_product_match[user_id]
+            logger.info(f"✅ Matched product: {name}")
+        elif user_last_product_match.get(user_id):
+            last = user_last_product_match[user_id]
             for name, price, stock in all_products:
-                if fallback_name in name.lower():
-                    stock_status = "✅ In stock" if stock == "instock" else "❌ Out of stock"
-                    db_context = (
-                        f"| Name | Price | Stock |\n"
-                        f"|------|-------|-------|\n"
-                        f"| {name} | AED {price} | {stock_status} |"
-                    )
+                if last in name.lower():
+                    stock_status = "in stock" if stock == "instock" else "out of stock"
+                    product_sentence = f"You're asking about *{name}*. It's AED {price} and currently {stock_status}."
                     source_tag = "\n\n_Source: Memory_"
                     break
+        else:
+            return {"response": "I couldn't find this product. Could you try a keyword like 'Thuya cleanser' or 'Noemi dye'?"}
 
     except Exception as e:
-        logger.error(f"❌ Product DB fetch failed: {e}")
+        logger.error(f"❌ DB error: {e}")
+        return {"response": "Sorry, I had trouble accessing product details. Please try again."}
 
-    # Build prompt for Hermes
+    # Compose LLM prompt
     prompt = (
-        "You are Aura, a knowledgeable and kind beauty assistant at Miyagogi.\n"
-        "Always use the product info provided in the table. Do not make up prices or stock info.\n"
-        "Respond helpfully and clearly.\n"
+        "You are Aura, a helpful and knowledgeable assistant at Miyagogi.\n"
+        "Start by confirming the product name, price, and stock as provided below.\n"
+        "Answer naturally like you're talking to a real customer.\n\n"
+        f"Product Info: {product_sentence}\n"
     )
-    if db_context:
-        prompt += f"\n\nProduct Info:\n{db_context}"
     for msg in messages:
-        prompt += f"\n{msg['role'].capitalize()}: {msg['content']}"
-    prompt += "\nAssistant:"
+        prompt += f"{msg['role'].capitalize()}: {msg['content']}\n"
+    prompt += "Assistant:"
 
     try:
         inputs = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=768, padding=True)
@@ -464,27 +451,24 @@ async def ask_hermes(
         decoded = tokenizer.decode(output[0], skip_special_tokens=True)
         answer = decoded.split("Assistant:")[-1].strip()
 
-        # Combine clean response
-        final_response = f"{db_context}\n\n{answer}" if db_context else answer
-        final_response += source_tag
+        final_response = f"{product_sentence}\n\n{answer}{source_tag}"
         final_response += "\n\n" + random.choice([
             "Let me know if you'd like a tailored recommendation 😊",
-            "I can help you compare different options if you'd like 💬",
-            "Happy to guide you to the perfect product ✨"
+            "I can help you compare similar items if you'd like 💬",
+            "Happy to help you choose the best option ✨"
         ])
 
-        user_chat_memory[user_id].append({"role": "user", "content": data.query})
+        user_chat_memory[user_id].append({"role": "user", "content": query_text})
         user_chat_memory[user_id].append({"role": "assistant", "content": answer})
-
         return {"response": final_response}
 
     except torch.cuda.OutOfMemoryError:
         torch.cuda.empty_cache()
-        logger.error("❌ CUDA OOM in Hermes")
-        return {"error": "Hermes out of memory. Try again."}
+        return {"error": "Hermes ran out of memory."}
     except Exception as e:
-        logger.error(f"Hermes failed: {e}")
-        return {"error": "Hermes failed."}
+        logger.error(f"❌ Hermes error: {e}")
+        return {"error": "Hermes model failed."}
+
 # ─────────────────────────────── Bot Lifecycle ──────────────────────────────────
 @app.on_event("startup")
 async def startup():
