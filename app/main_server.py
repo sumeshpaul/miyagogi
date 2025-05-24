@@ -33,6 +33,9 @@ from telegram import Update
 from telegram.constants import ParseMode
 from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filters
 from logic_handler import prioritize_reply_logic
+import requests
+from requests.auth import HTTPBasicAuth
+from bs4 import BeautifulSoup
 
 # ───────────────────────────────────────────────
 # External APIs and Business Logic
@@ -365,74 +368,57 @@ async def interpret_query(data: ProductQuery):
         return {"error": "Interpretation failed."}
 
 # ──────────────────────────────── /ask Endpoint for Hermes Chat (Improved) ─────────────────────────────
-
 @app.post("/ask", response_model=Dict[str, str])
 async def ask_hermes(data: ProductQuery, user_id: str = Query(...)):
-    import re
-    import difflib
-
-    def normalize(text):
-        text = text.lower()
-        text = re.sub(r'\(.*?\)', '', text)
-        text = re.sub(r'\b(ml|g|pairs|kit|pcs|pack|sachet|10ml|20ml|150ml|15ml|30ml|8 pairs)\b', '', text)
-        text = re.sub(r'[^a-z0-9\s]', '', text)
-        return text.strip()
-
     query_text = data.query.strip()
-    query_norm = normalize(query_text)
     messages = user_chat_memory[user_id][-MEMORY_MAX_TURNS:]
     messages.append({"role": "user", "content": query_text})
-    best_match = None
-    best_score = 0.0
+
+    # �� Check memory for vague follow-up
+    vague_keywords = ["how much", "price", "is it in stock", "availability", "is it good"]
+    if any(kw in query_text.lower() for kw in vague_keywords):
+        last_product = user_last_product_match.get(user_id)
+        if last_product:
+            query_text = last_product  # Replace query with last matched product
+
+    # 🔁 Step 1: WooCommerce API live search
+    WC_URL = os.getenv("WC_URL") + "/wp-json/wc/v3/products"
+    WC_KEY = os.getenv("WC_KEY")
+    WC_SECRET = os.getenv("WC_SECRET")
+    response = requests.get(
+        WC_URL,
+        params={"search": query_text, "per_page": 1},
+        auth=HTTPBasicAuth(WC_KEY, WC_SECRET),
+    )
+
     product_sentence = ""
-    source_tag = ""
+    if response.status_code == 200 and response.json():
+        product = response.json()[0]
+        name = product.get("name")
+        price = product.get("price", "N/A")
+        stock = "in stock" if product.get("stock_status") == "instock" else "out of stock"
+        summary = BeautifulSoup(product.get("short_description", ""), "html.parser").get_text(" ", strip=True)
+        product_sentence = f"The {name} is available for AED {price} and it's currently {stock}. {summary.strip()}"
+        user_last_product_match[user_id] = name.lower()
+    else:
+        # 🧃 Step 2: Soft keyword fallback
+        keywords = query_text.lower().split()
+        results = search_products_by_keywords(keywords, DB_PATH)
+        if results:
+            suggestions = []
+            for brand, items in results.items():
+                for item in items:
+                    stock = "in stock" if item['stock'] == "instock" else "out of stock"
+                    suggestions.append(f"{item['name']} — AED {item['price']} ({stock})")
+            if suggestions:
+                return {"response": "Here are a few products you might like:\n" + "\n".join(suggestions[:3]) + "\n\nLet me know if you'd like help comparing them."}
+        return {"response": "I couldn’t find a match for that. Could you rephrase or try a brand like Thuya or Noemi?"}
 
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("SELECT name, price, stock_status FROM products")
-        all_products = cursor.fetchall()
-        conn.close()
-
-        # Primary fuzzy match
-        for name, price, stock in all_products:
-            name_norm = normalize(name)
-            score = difflib.SequenceMatcher(None, query_norm, name_norm).ratio()
-            if query_norm in name_norm:
-                score += 0.4
-            if score > best_score:
-                best_score = score
-                best_match = (name, price, stock)
-
-        # Inject best match if strong enough
-        if best_score > 0.62:
-            name, price, stock = best_match
-            stock_status = "in stock" if stock == "instock" else "out of stock"
-            product_sentence = f"The {name} is priced at AED {price} and it's currently {stock_status}."
-            user_last_product_match[user_id] = name.lower()
-            source_tag = "\n\n_Source: DB_"
-        elif user_last_product_match.get(user_id):
-            # Memory fallback
-            last = user_last_product_match[user_id]
-            for name, price, stock in all_products:
-                if last in name.lower():
-                    stock_status = "in stock" if stock == "instock" else "out of stock"
-                    product_sentence = f"You're asking about {name}. It's AED {price} and currently {stock_status}."
-                    source_tag = "\n\n_Source: Memory_"
-                    break
-        else:
-            # Clarification
-            return {"response": "I couldn’t find this product in our catalog. Could you try rephrasing or mention a brand like 'Thuya' or 'Noemi'?"}
-
-    except Exception as e:
-        logger.error(f"❌ DB error: {e}")
-        return {"response": "Sorry, I had trouble accessing product details. Please try again shortly."}
-
-    # 🧠 LLM Prompt
+    # 🧠 Build prompt
     prompt = (
-        "You are Aura, a kind and knowledgeable beauty assistant working at Miyagogi.\n"
-        "Start by sharing the product name, price, and stock status clearly.\n"
-        "Be concise, friendly, and do not hallucinate other products or prices.\n\n"
+        "You are Aura, a helpful beauty assistant at Miyagogi.\n"
+        "Start by clearly stating the product name, price, and availability.\n"
+        "Be warm and natural. Don't repeat yourself or make up information.\n\n"
         f"Product Info: {product_sentence}\n"
     )
     for msg in messages:
@@ -454,13 +440,7 @@ async def ask_hermes(data: ProductQuery, user_id: str = Query(...)):
         decoded = tokenizer.decode(output[0], skip_special_tokens=True)
         answer = decoded.split("Assistant:")[-1].strip()
 
-        final_response = f"{product_sentence}\n\n{answer}{source_tag}"
-        final_response += "\n\n" + random.choice([
-            "Let me know if you'd like help choosing the best option 😊",
-            "I can help you compare similar items if you'd like 💬",
-            "Happy to assist with any other product too ✨"
-        ])
-
+        final_response = f"{product_sentence}\n\n{answer}\n\nLet me know if you'd like help choosing related accessories or comparing similar products 😊"
         user_chat_memory[user_id].append({"role": "user", "content": query_text})
         user_chat_memory[user_id].append({"role": "assistant", "content": answer})
         return {"response": final_response}
