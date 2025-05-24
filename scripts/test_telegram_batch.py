@@ -254,7 +254,7 @@ queries = [
 "thuya la cream",
 "Tell me about enigma pro straight tweezer metallic",
 "Tell me about henna expert eyebrow ruler",
-"ProBeauty Space Comfort Under Knee Pillow "Neo"",
+"ProBeauty Space Comfort Under Knee Pillow \"Neo\"",
 "Tell me about lash&amp;go lash extension primer 15ml",
 "emocean  cream",
 "Make Up False Strip Lashes Model 3DV43",
