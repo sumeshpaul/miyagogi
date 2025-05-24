@@ -3,7 +3,7 @@ import shutil
 from datetime import datetime
 
 # Define source and destination
-SOURCE_FILE = "/mnt/data/logs.csv"
+SOURCE_FILE = "/mnt/ssd2tb/projects/miyagogi/logs.csv"
 TIMESTAMP = datetime.now().strftime("%Y%m%d_%H%M")
 DEST_DIR = "/mnt/nas_llm/backups"
 DEST_FILE = f"{DEST_DIR}/miyagogi_logs_prod_v1_{TIMESTAMP}.csv"
