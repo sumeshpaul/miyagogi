@@ -17,3 +17,4 @@ nohup: ignoring input
 2025-05-24T17:54:50Z INF Registered tunnel connection connIndex=1 connection=abf3d2ee-c27f-43c2-a6d0-9b01d1ff5712 event=0 ip=198.41.200.23 location=ams01 protocol=http2
 2025-05-24T17:54:50Z INF Registered tunnel connection connIndex=2 connection=6b6fd90f-4015-47c4-bbef-58bc90c50e6a event=0 ip=198.41.192.77 location=dxb02 protocol=http2
 2025-05-24T17:54:52Z INF Registered tunnel connection connIndex=3 connection=e78da51e-53cc-4bee-8de1-6c92ac658d47 event=0 ip=198.41.200.33 location=ams17 protocol=http2
+2025-05-24T17:55:02Z INF Initiating graceful shutdown due to signal terminated ...
