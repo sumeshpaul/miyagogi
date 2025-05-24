@@ -1,56 +1,65 @@
 # scripts/test_telegram_batch.py
-import asyncio
+
 import aiohttp
+import asyncio
+import csv
 import time
+from datetime import datetime
 
 BOT_TOKEN = "7987599734:AAGJPPAwNo6lzlUxB6PenofWCPXKZ_u6t_0"
-CHAT_ID = "<your_user_id>"  # ← Replace with your real Telegram user_id
-API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
+CHAT_ID = "715037900"  # ✅ Replace with your actual chat ID
+URL = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
 
-TEST_QUERIES = [
-    "thuya shampoo",
-    "Thuya Brow Scrub 15ml",
-    "brow lamination Thuya vegan",
+queries = [
     "Thuya cleanser",
-    "Noemi pads",
-    "lash lift glue",
+    "Thuya Brow Scrub 15ml",
     "Sculptor Dye Oxidant",
     "lash foam cleaner",
+    "thuya shampoo",
+    "lash lift glue",
+    "Noemi pads",
+    "brow lamination Thuya vegan",
     "serum for men",
-    "dishwashing cream",
+    "dishwashing cream"
 ]
 
-async def send_message(session, text):
+log_filename = "batch_test_log.csv"
+
+# Initialize CSV log
+with open(log_filename, "w", newline="") as f:
+    writer = csv.writer(f)
+    writer.writerow(["Timestamp", "Query", "Status", "Description"])
+
+async def send_query(session, query):
+    timestamp = datetime.utcnow().isoformat()
     payload = {
         "chat_id": CHAT_ID,
-        "text": text,
-        "parse_mode": "HTML"
+        "text": query
     }
-    async with session.post(f"{API_URL}/sendMessage", json=payload) as resp:
-        result = await resp.json()
-        return result
 
-async def fetch_updates(session):
-    async with session.get(f"{API_URL}/getUpdates") as resp:
-        return await resp.json()
-
-async def run_tests():
-    async with aiohttp.ClientSession() as session:
-        for query in TEST_QUERIES:
-            response = await send_message(session, query)
-            if response.get("ok"):
+    try:
+        async with session.post(URL, json=payload) as resp:
+            result = await resp.json()
+            if result.get("ok"):
                 print(f"✅ Sent: {query}")
+                log_row = [timestamp, query, "✅ Sent", ""]
             else:
-                print(f"❌ Failed: {query} → {response}")
+                error_msg = result.get("description", "Unknown error")
+                print(f"❌ Failed: {query[:30]}... → {error_msg}")
+                log_row = [timestamp, query, "❌ Failed", error_msg]
+    except Exception as e:
+        print(f"❌ Exception: {query[:30]}... → {e}")
+        log_row = [timestamp, query, "❌ Exception", str(e)]
 
-            await asyncio.sleep(2)  # Give bot time to reply
+    # Append to CSV
+    with open(log_filename, "a", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(log_row)
 
-        # Fetch latest messages
-        print("\n🔍 Fetching recent replies from Telegram:")
-        updates = await fetch_updates(session)
-        messages = updates.get("result", [])[-len(TEST_QUERIES):]
-        for msg in messages:
-            text = msg["message"]["text"]
-            print(f"📨 {text}")
+async def main():
+    async with aiohttp.ClientSession() as session:
+        tasks = [send_query(session, q) for q in queries]
+        await asyncio.gather(*tasks)
 
-asyncio.run(run_tests())
+if __name__ == "__main__":
+    asyncio.run(main())
