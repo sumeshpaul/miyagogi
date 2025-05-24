@@ -364,9 +364,6 @@ async def interpret_query(data: ProductQuery):
         return {"error": "Interpretation failed."}
 
 # ──────────────────────────────── /ask Endpoint for Hermes Chat (Improved) ─────────────────────────────
-# ✅ Enhanced /ask Endpoint with Soft Fallback + Improved Human Tone
-user_last_product_match = defaultdict(str)
-
 @app.post("/ask", response_model=Dict[str, str])
 async def ask_hermes(
     data: ProductQuery, user_id: str = Query(..., description="Telegram user ID")
@@ -379,6 +376,7 @@ async def ask_hermes(
     messages.append({"role": "user", "content": data.query})
 
     db_context = ""
+    source_tag = ""
     suggestions = []
     best_match = None
 
@@ -387,11 +385,15 @@ async def ask_hermes(
         cursor = conn.cursor()
         cursor.execute("SELECT name, price, stock_status FROM products")
         all_products = cursor.fetchall()
+        conn.close()
 
         best_score = 0.0
         for name, price, stock in all_products:
             name_lower = name.lower()
-            score = difflib.SequenceMatcher(None, query_text, name_lower).ratio()
+            ratio_score = difflib.SequenceMatcher(None, query_text, name_lower).ratio()
+            contains_score = 0.85 if query_text in name_lower else 0
+            score = max(ratio_score, contains_score)
+
             if score > best_score:
                 best_score = score
                 best_match = (name, price, stock)
@@ -400,9 +402,14 @@ async def ask_hermes(
 
         if best_score > 0.68 and best_match:
             name, price, stock = best_match
-            stock_status = "✅ In stock" if stock == "instock" else "Out of stock"
-            db_context = f"{name} is priced at AED {price}.\nStock status: {stock_status}."
+            stock_status = "✅ In stock" if stock == "instock" else "❌ Out of stock"
+            db_context = (
+                f"| Name | Price | Stock |\n"
+                f"|------|-------|-------|\n"
+                f"| {name} | AED {price} | {stock_status} |"
+            )
             user_last_product_match[user_id] = name.lower()
+            source_tag = "\n\n_Source: DB_"
             logger.info(f"✅ Injected product info for: {name}")
 
         elif suggestions:
@@ -412,17 +419,29 @@ async def ask_hermes(
                 for n, p, s in top
             ])
             db_context = f"I couldn't find an exact match, but here are some similar options:\n{suggestion_text}"
+            source_tag = "\n\n_Source: Suggestions_"
 
-        conn.close()
+        elif user_last_product_match[user_id]:
+            fallback_name = user_last_product_match[user_id]
+            for name, price, stock in all_products:
+                if fallback_name in name.lower():
+                    stock_status = "✅ In stock" if stock == "instock" else "❌ Out of stock"
+                    db_context = (
+                        f"| Name | Price | Stock |\n"
+                        f"|------|-------|-------|\n"
+                        f"| {name} | AED {price} | {stock_status} |"
+                    )
+                    source_tag = "\n\n_Source: Memory_"
+                    break
 
     except Exception as e:
         logger.error(f"❌ Product DB fetch failed: {e}")
 
-    # 🧠 Compose LLM Prompt
+    # Build prompt for Hermes
     prompt = (
         "You are Aura, a knowledgeable and kind beauty assistant at Miyagogi.\n"
-        "Respond clearly and helpfully, starting with available product information.\n"
-        "If there's no exact match, offer helpful suggestions."
+        "Always use the product info provided in the table. Do not make up prices or stock info.\n"
+        "Respond helpfully and clearly.\n"
     )
     if db_context:
         prompt += f"\n\nProduct Info:\n{db_context}"
@@ -431,7 +450,7 @@ async def ask_hermes(
     prompt += "\nAssistant:"
 
     try:
-        inputs = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=512, padding=True)
+        inputs = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=768, padding=True)
         inputs = {k: v.to(model.device) for k, v in inputs.items()}
         output = model.generate(
             input_ids=inputs["input_ids"],
@@ -445,7 +464,9 @@ async def ask_hermes(
         decoded = tokenizer.decode(output[0], skip_special_tokens=True)
         answer = decoded.split("Assistant:")[-1].strip()
 
-        final_response = f"{html.escape(db_context)}\n\n{html.escape(answer)}" if db_context else html.escape(answer)
+        # Combine clean response
+        final_response = f"{db_context}\n\n{answer}" if db_context else answer
+        final_response += source_tag
         final_response += "\n\n" + random.choice([
             "Let me know if you'd like a tailored recommendation 😊",
             "I can help you compare different options if you'd like 💬",
