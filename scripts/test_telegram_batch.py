@@ -10,7 +10,7 @@ import html
 BOT_TOKEN = "7987599734:AAGJPPAwNo6lzlUxB6PenofWCPXKZ_u6t_0"
 CHAT_ID = "715037900"  # Your Telegram chat ID
 SEND_URL = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-LOGS_URL = "http://localhost:8000/recent-logs?limit=100"
+LOGS_URL = "http://localhost:8001/recent-logs?limit=100"
 
 queries = [
     "Thuya cleanser",
