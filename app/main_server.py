@@ -417,7 +417,7 @@ async def ask_hermes(
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
 
-        if brand_match:
+        if brand_match and not is_price_question:
             cursor.execute("""
                 SELECT name, price, stock_status FROM products
                 WHERE LOWER(name) LIKE ?
@@ -519,6 +519,7 @@ async def ask_hermes(
     except Exception as e:
         logger.error(f"Hermes failed: {e}")
         return {"error": "Hermes failed."}
+
 # ─────────────────────────────── Bot Lifecycle ──────────────────────────────────
 @app.on_event("startup")
 async def startup():
