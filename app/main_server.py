@@ -26,6 +26,8 @@ from collections import defaultdict
 import time
 import gradio as gr
 import uvicorn
+import random
+from typing import Dict
 
 # ──────────────────────────── Logging & Environment ─────────────────────────────
 logging.basicConfig(level=logging.INFO)
@@ -373,9 +375,6 @@ async def interpret_query(data: ProductQuery):
         logger.error(f"/interpret failed: {e}")
         return {"error": "Interpretation failed."}
 # ──────────────────────────────── /ask Endpoint for Hermes Chat (Improved) ─────────────────────────────
-from collections import defaultdict
-import random
-
 user_last_product_match = defaultdict(str)
 
 @app.post("/ask", response_model=Dict[str, str])
@@ -397,17 +396,27 @@ async def ask_hermes(
     brand_match = None
 
     try:
-        recent_product_text = ""
+        recent_product_text = query_text
+
+        # Use exact product match from query for price questions
         if is_price_question:
-            if user_last_product_match[user_id]:
+            conn = sqlite3.connect(DB_PATH)
+            cursor = conn.cursor()
+            cursor.execute("SELECT LOWER(name) FROM products")
+            product_names = [row[0] for row in cursor.fetchall()]
+            conn.close()
+
+            exact_match = next((p for p in product_names if p in query_text), None)
+            if exact_match:
+                recent_product_text = exact_match
+                user_last_product_match[user_id] = exact_match
+            elif user_last_product_match[user_id]:
                 recent_product_text = user_last_product_match[user_id]
             else:
                 for past_msg in reversed(user_chat_memory[user_id]):
                     if past_msg["role"] == "user" and not any(kw in past_msg["content"].lower() for kw in price_related_keywords):
                         recent_product_text = past_msg["content"].lower()
                         break
-        else:
-            recent_product_text = query_text
 
         for brand in ["thuya", "noemi", "fairy", "lash"]:
             if brand in query_text:
