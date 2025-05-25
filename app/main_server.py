@@ -377,53 +377,62 @@ def fetch_woo_products(query_text, wc_url, wc_key, wc_secret, fallback_terms=Non
     return all_results
 
 # ──────────────────────────────── /ask Endpoint for Hermes Chat (Improved) ─────────────────────────────
+# PATCHED /ask ENDPOINT (API-Aware + Humanized)
+
 @app.post("/ask", response_model=Dict[str, str])
 async def ask_hermes(data: ProductQuery, user_id: str = Query(...)):
     query_text = data.query.strip()
     messages = user_chat_memory[user_id][-MEMORY_MAX_TURNS:]
     messages.append({"role": "user", "content": query_text})
 
-    vague_keywords = ["how much", "price", "is it in stock", "availability", "is it good", "stock", "how many"]
+    # 🧠 Smart vague follow-up memory (store full product, not just name)
+    vague_keywords = ["how much", "price", "is it in stock", "availability", "is it good", "stock", "how many", "safe", "compare"]
     query_lower = query_text.lower()
     is_vague = any(kw in query_lower for kw in vague_keywords)
     word_count = len(query_lower.split())
 
+    # ⏪ Use last product match for vague queries
     if is_vague and word_count <= 5:
         last_product = user_last_product_match.get(user_id)
         if last_product:
-            query_text = last_product
+            product = last_product
+        else:
+            product = None
+    else:
+        # 🔁 WooCommerce API call
+        WC_URL = os.getenv("WC_URL") + "/wp-json/wc/v3/products"
+        WC_KEY = os.getenv("WC_KEY")
+        WC_SECRET = os.getenv("WC_SECRET")
+        response = requests.get(
+            WC_URL,
+            params={"search": query_text, "per_page": 1},
+            auth=HTTPBasicAuth(WC_KEY, WC_SECRET),
+        )
+        if response.status_code == 200 and response.json():
+            product = response.json()[0]
+            user_last_product_match[user_id] = product  # Save full product for follow-ups
+        else:
+            return {"response": "I couldn’t find a match for that. Could you rephrase or try a brand like Thuya or Noemi?"}
 
-    WC_URL = os.getenv("WC_URL")
-    WC_KEY = os.getenv("WC_KEY")
-    WC_SECRET = os.getenv("WC_SECRET")
-    fallback_terms = ["glue", "remover", "cleanser", "serum", "kit", "oil", "tweezer", "lash", "brow"]
+    # 🧠 Woo product summary cleanup (1-2 lines only)
+    if product:
+        name = product.get("name")
+        price = product.get("price", "N/A")
+        stock = "in stock" if product.get("stock_status") == "instock" else "out of stock"
+        summary_raw = product.get("short_description", "") or product.get("description", "")
+        summary = BeautifulSoup(summary_raw, "html.parser").get_text(" ", strip=True)
+        short_summary = summary[:300].rsplit(".", 1)[0] + "." if len(summary) > 300 else summary
 
-    all_products = fetch_woo_products(query_text, WC_URL, WC_KEY, WC_SECRET, fallback_terms)
+        product_sentence = f"The {name} is available for AED {price} and it's currently {stock}."
+        if short_summary:
+            product_sentence += f" {short_summary}"
 
-    # ✅ Filter: match query text in name/categories/tags
-    matched_products = [
-        p for p in all_products
-        if query_text.lower() in p.get("name", "").lower()
-        or any(query_text.lower() in tag.get("name", "").lower() for tag in p.get("tags", []))
-        or any(query_text.lower() in cat.get("name", "").lower() for cat in p.get("categories", []))
-    ]
-    product = matched_products[0] if matched_products else (all_products[0] if all_products else None)
-
-    if not product:
-        return {"response": "I couldn’t find a match for that. Could you rephrase or try a brand like Thuya, Noemi, or Enigma?"}
-
-    name = product.get("name", "")
-    price = product.get("price", "N/A")
-    stock = "in stock" if product.get("stock_status") == "instock" else "out of stock"
-    from bs4 import BeautifulSoup
-    summary = BeautifulSoup(product.get("short_description", ""), "html.parser").get_text(" ", strip=True)
-    product_sentence = f"The {name} is available for AED {price} and it's currently {stock}. {summary.strip()}"
-    user_last_product_match[user_id] = name.lower()
-
+    # 🤖 LLM Prompt
     prompt = (
-        "You are Aura, a helpful and professional beauty assistant at Miyagogi.\n"
-        "Clearly state the product name, price, and availability. Sound natural, avoid repetition.\n\n"
-        f"Product Info: {product_sentence}\n"
+        "You are Aura, a kind and knowledgeable beauty consultant at Miyagogi.\n"
+        "Always answer like a human, clearly and conversationally.\n"
+        "Start with the product name, price, and stock. Do not repeat descriptions or sound robotic.\n"
+        f"\nProduct Info: {product_sentence}\n"
     )
     for msg in messages:
         prompt += f"{msg['role'].capitalize()}: {msg['content']}\n"
@@ -444,28 +453,7 @@ async def ask_hermes(data: ProductQuery, user_id: str = Query(...)):
         decoded = tokenizer.decode(output[0], skip_special_tokens=True)
         answer = decoded.split("Assistant:")[-1].strip()
 
-        # ✅ Clean duplicate response blocks
-        lines = answer.split("\n")
-        unique_lines = []
-        seen = set()
-        for line in lines:
-            norm = line.strip().lower()
-            if norm and norm not in seen:
-                unique_lines.append(line)
-                seen.add(norm)
-        cleaned_answer = "\n".join(unique_lines)
-
-        final_response = f"{product_sentence}\n\n{cleaned_answer}\n\nLet me know if you'd like help choosing related accessories or comparing similar products 😊"
-        user_chat_memory[user_id].append({"role": "user", "content": query_text})
-        user_chat_memory[user_id].append({"role": "assistant", "content": cleaned_answer})
-        return {"response": final_response}
-
-    except torch.cuda.OutOfMemoryError:
-        torch.cuda.empty_cache()
-        return {"error": "Hermes ran out of memory."}
-    except Exception as e:
-        logger.error(f"❌ Hermes error: {e}")
-        return {"error": "Hermes model failed."}
+        final_response = f"{product_sentence}\n\n{answer}\n\nLet me know if you'd like help choosing related accessories or comparing similar products 
 
 # ─────────────────────────────── Bot Lifecycle ──────────────────────────────────
 @app.on_event("startup")
