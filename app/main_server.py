@@ -376,9 +376,6 @@ def fetch_woo_products(query_text, wc_url, wc_key, wc_secret, fallback_terms=Non
     
     return all_results
 
-# app/main_server.py
-# (all existing imports remain unchanged)
-
 # ──────────────────────────────── /ask Endpoint for Hermes Chat (FINAL HUMANIZED) ─────────────────────────────
 @app.post("/ask", response_model=Dict[str, str])
 async def ask_hermes(data: ProductQuery, user_id: str = Query(...)):
@@ -386,52 +383,51 @@ async def ask_hermes(data: ProductQuery, user_id: str = Query(...)):
     messages = user_chat_memory[user_id][-MEMORY_MAX_TURNS:]
     messages.append({"role": "user", "content": query_text})
 
-    vague_keywords = [
-        "how much", "price", "in stock", "availability", "is it good",
-        "compare", "compare with", "safe", "how many", "details", "ingredients"
-    ]
+    # 🧠 Vague follow-up handling
+    vague_keywords = ["how much", "price", "is it in stock", "availability", "is it good", "stock", "how many", "safe", "compare"]
     query_lower = query_text.lower()
     is_vague = any(kw in query_lower for kw in vague_keywords)
     word_count = len(query_lower.split())
 
-    product = None
+    # 🔄 Use memory if vague follow-up
     if is_vague and word_count <= 5:
         product = user_last_product_match.get(user_id)
-
-    if not product:
-        # WooCommerce API Search
+        if not product:
+            return {"response": "I couldn’t find a match for that. Could you rephrase or ask about a specific product?"}
+    else:
+        # 🔍 WooCommerce API search
         WC_URL = os.getenv("WC_URL") + "/wp-json/wc/v3/products"
         WC_KEY = os.getenv("WC_KEY")
         WC_SECRET = os.getenv("WC_SECRET")
         response = requests.get(
             WC_URL,
-            params={"search": query_text, "per_page": 3},
+            params={"search": query_text, "per_page": 1},
             auth=HTTPBasicAuth(WC_KEY, WC_SECRET),
         )
         if response.status_code == 200 and response.json():
-            product = response.json()[0]  # use best match
-            user_last_product_match[user_id] = product  # store full object
+            product = response.json()[0]
+            user_last_product_match[user_id] = product  # 🧠 Save full product
         else:
-            return {"response": "I couldn’t find a match for that. Could you try rephrasing or ask about brands like Thuya or Noemi?"}
+            return {"response": "I couldn’t find a match for that. Could you rephrase or try asking about Thuya or Noemi products?"}
 
-    # Product Info Extraction
-    name = product.get("name")
+    # 🧾 Build context
+    name = product.get("name", "")
     price = product.get("price", "N/A")
     stock = "in stock" if product.get("stock_status") == "instock" else "out of stock"
     summary_raw = product.get("short_description", "") or product.get("description", "")
     summary = BeautifulSoup(summary_raw, "html.parser").get_text(" ", strip=True)
-    short_summary = summary[:400].rsplit(".", 1)[0] + "." if len(summary) > 400 else summary
+    short_summary = summary[:300].rsplit(".", 1)[0] + "." if len(summary) > 300 else summary
 
     product_sentence = f"The {name} is available for AED {price} and it's currently {stock}."
     if short_summary:
         product_sentence += f" {short_summary}"
 
-    # Final prompt to LLM
+    # 🤖 Build LLM prompt
     prompt = (
-        "You are Aura, a kind and intelligent beauty assistant at Miyagogi.\n"
-        "Use the product info below to reply naturally to the customer.\n"
-        "Avoid repeating the exact same lines. Give real, human-like answers.\n"
-        f"\nProduct Info: {product_sentence}\n\n"
+        "You are Aura, a kind and knowledgeable beauty consultant at Miyagogi.\n"
+        "Always answer like a human, clearly and conversationally.\n"
+        "Start with the product name, price, and stock. Don't repeat or make things up.\n\n"
+        f"Product Info: {product_sentence}\n"
     )
     for msg in messages:
         prompt += f"{msg['role'].capitalize()}: {msg['content']}\n"
@@ -452,8 +448,7 @@ async def ask_hermes(data: ProductQuery, user_id: str = Query(...)):
         decoded = tokenizer.decode(output[0], skip_special_tokens=True)
         answer = decoded.split("Assistant:")[-1].strip()
 
-        final_response = f"{product_sentence}\n\n{answer}\n\nLet me know if you'd like help comparing this with other products or placing an order 😊"
-        user_chat_memory[user_id].append({"role": "user", "content": query_text})
+        final_response = f"{product_sentence}\n\n{answer}\n\nLet me know if you'd like help comparing or ordering 😊"
         user_chat_memory[user_id].append({"role": "assistant", "content": answer})
         return {"response": final_response}
 
