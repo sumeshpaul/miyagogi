@@ -354,16 +354,19 @@ async def interpret_query(data: ProductQuery):
         return {"error": "Interpretation failed."}
 
 # ──────────────────────────────── /ask Endpoint for Hermes Chat (Improved) ─────────────────────────────
-# ──────────────────────────────── /ask Endpoint for Hermes Chat (Improved) ─────────────────────────────
 @app.post("/ask", response_model=Dict[str, str])
 async def ask_hermes(data: ProductQuery, user_id: str = Query(...)):
     query_text = data.query.strip()
     messages = user_chat_memory[user_id][-MEMORY_MAX_TURNS:]
     messages.append({"role": "user", "content": query_text})
 
-    # 🧠 Check memory for vague follow-up
-    vague_keywords = ["how much", "price", "is it in stock", "availability", "is it good"]
-    if any(kw in query_text.lower() for kw in vague_keywords):
+    # 🧠 Smart memory fallback only for vague, short follow-ups
+    vague_keywords = ["how much", "price", "is it in stock", "availability", "is it good", "stock", "how many"]
+    query_lower = query_text.lower()
+    is_vague = any(kw in query_lower for kw in vague_keywords)
+    word_count = len(query_lower.split())
+
+    if is_vague and word_count <= 5:
         last_product = user_last_product_match.get(user_id)
         if last_product:
             query_text = last_product
