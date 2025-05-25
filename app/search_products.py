@@ -7,6 +7,7 @@ from bs4 import BeautifulSoup
 import json
 import html
 import difflib
+from collections import defaultdict
 
 def clean_html(text):
     if not text:
@@ -35,12 +36,12 @@ def search_products_by_keywords(
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
 
-    # Build WHERE clause dynamically
+    # Expand WHERE clause to include more fields
     clauses = []
     params = []
     for kw in keywords:
         like = f"%{kw.lower()}%"
-        for field in ["name", "tags", "categories", "attributes"]:
+        for field in ["name", "tags", "categories", "attributes", "short_description"]:
             clauses.append(f"LOWER({field}) LIKE ?")
             params.append(like)
 
@@ -48,72 +49,52 @@ def search_products_by_keywords(
     SELECT name, price, stock_status, short_description, permalink, tags
     FROM products
     WHERE {" OR ".join(clauses)}
+    LIMIT 20
     """
     cursor.execute(query, params)
     rows = cursor.fetchall()
+    conn.close()
 
-    # Determine primary brand to prioritize
-    primary_brand = None
-    for kw in keywords:
-        if kw.lower() in (
-            "thuya", "lashgo", "enigma", "sculptor", "viktoria", "revitabrow"
-        ):
-            primary_brand = kw.upper()
-            break
-
-    main_brand_results = {}
-    other_brand_results = {}
-
-    for name, price, stock, summary, link, tags in rows:
+    results_by_brand = defaultdict(list)
+    for name, price, stock, desc, link, tags in rows:
         brand = extract_brand(tags, name).upper()
-        item = {
+        results_by_brand[brand].append({
             "name": name,
             "price": price,
             "stock": stock,
-            "summary": clean_html(summary),
+            "summary": clean_html(desc),
             "link": link,
-        }
-        if primary_brand and brand == primary_brand:
-            main_brand_results.setdefault(brand, []).append(item)
-        else:
-            other_brand_results.setdefault(brand or "Other", []).append(item)
+        })
 
-    conn.close()
-
-    results = {}
-    if main_brand_results:
-        results.update(main_brand_results)
-    if other_brand_results:
-        results["Suggested from other brands"] = [
-            item for sublist in other_brand_results.values() for item in sublist[:3]
-        ]
+    if results_by_brand:
+        return dict(results_by_brand)
 
     # ✅ Fuzzy fallback if no results found
-    if not results:
-        try:
-            conn = sqlite3.connect(db_path)
-            cursor = conn.cursor()
-            cursor.execute("SELECT name, price, stock_status FROM products")
-            all_products = cursor.fetchall()
-            conn.close()
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        cursor.execute("SELECT name, price, stock_status FROM products")
+        all_products = cursor.fetchall()
+        conn.close()
 
-            scored = sorted(
-                all_products,
-                key=lambda row: max(
-                    difflib.SequenceMatcher(None, kw.lower(), row[0].lower()).ratio()
-                    for kw in keywords
-                ),
-                reverse=True
-            )[:3]
+        scored = sorted(
+            all_products,
+            key=lambda row: max(
+                difflib.SequenceMatcher(None, kw.lower(), row[0].lower()).ratio()
+                for kw in keywords
+            ),
+            reverse=True
+        )[:3]
 
-            results["Suggested matches"] = [{
+        return {
+            "Suggested matches": [{
                 "name": name,
                 "price": price,
                 "stock": stock,
                 "summary": "",
                 "link": "#"
             } for name, price, stock in scored]
-        except Exception as e:
-            print(f"❌ Fuzzy fallback error: {e}")
-
-    return results
+        }
+    except Exception as e:
+        print(f"❌ Fuzzy fallback error: {e}")
+        return {}
