@@ -379,18 +379,36 @@ def fetch_woo_products(query_text, wc_url, wc_key, wc_secret, fallback_terms=Non
 # ──────────────────────────────── /ask Endpoint for Hermes Chat (FINAL HUMANIZED) ─────────────────────────────
 @app.post("/ask", response_model=Dict[str, str])
 async def ask_hermes(data: ProductQuery, user_id: str = Query(...)):
+    import re
+
     query_text = data.query.strip()
     messages = user_chat_memory[user_id][-MEMORY_MAX_TURNS:]
     messages.append({"role": "user", "content": query_text})
 
-    # 🧠 Check for vague follow-up
+    # 🛡️ Handle safety-related queries early
+    if "pregnan" in query_text.lower():
+        return {"response": (
+            "This product doesn’t specify whether it's safe during pregnancy. "
+            "Please consult the manufacturer or a healthcare provider before use."
+        )}
+
+    # 🤝 Comparison detection (simple two-product)
+    compare_match = re.search(r"compare (.+?) (with|vs|and) (.+)", query_text.lower())
+    if compare_match:
+        prod1, _, prod2 = compare_match.groups()
+        return {"response": (
+            f"Got it — you'd like to compare '{prod1}' and '{prod2}'. "
+            f"I'm fetching details... (comparison support coming next patch 🚧)"
+        )}
+
+    # �� Use memory if vague query
     vague_keywords = ["how much", "price", "is it in stock", "availability", "is it good"]
     if any(kw in query_text.lower() for kw in vague_keywords):
         last_product = user_last_product_match.get(user_id)
         if last_product:
-            query_text = last_product  # Use last product for vague question
+            query_text = last_product
 
-    # 🔍 Step 1: WooCommerce API live search
+    # 🔍 WooCommerce live product search
     WC_URL = os.getenv("WC_URL") + "/wp-json/wc/v3/products"
     WC_KEY = os.getenv("WC_KEY")
     WC_SECRET = os.getenv("WC_SECRET")
@@ -407,10 +425,13 @@ async def ask_hermes(data: ProductQuery, user_id: str = Query(...)):
         price = product.get("price", "N/A")
         stock = "in stock" if product.get("stock_status") == "instock" else "out of stock"
         summary = BeautifulSoup(product.get("short_description", ""), "html.parser").get_text(" ", strip=True)
+
+        # ✅ Deduplicate phrase fragments
         product_sentence = f"The {name} is available for AED {price} and it's currently {stock}. {summary.strip()}"
+        product_sentence = " ".join(dict.fromkeys(product_sentence.split(". "))).strip()
         user_last_product_match[user_id] = name.lower()
     else:
-        # 🔁 Step 2: DB keyword fallback
+        # 🔁 Fallback to keyword-based DB query
         keywords = query_text.lower().split()
         results = search_products_by_keywords(keywords, DB_PATH)
         if results:
@@ -420,14 +441,18 @@ async def ask_hermes(data: ProductQuery, user_id: str = Query(...)):
                     stock = "in stock" if item['stock'] == "instock" else "out of stock"
                     suggestions.append(f"{item['name']} — AED {item['price']} ({stock})")
             if suggestions:
-                return {"response": "Here are a few products you might like:\n" + "\n".join(suggestions[:3]) + "\n\nLet me know if you'd like help comparing them."}
-        return {"response": "I couldn’t find a match for that. Could you rephrase or try a brand like Thuya or Noemi?"}
+                return {
+                    "response": "Here are a few products you might like:\n" +
+                                "\n".join(suggestions[:3])
+                }
+        return {
+            "response": "I couldn’t find a match for that. Could you rephrase or try a brand like Thuya or Noemi?"
+        }
 
-    # 🤖 LLM prompt
+    # 🤖 Hermes LLM Prompt
     prompt = (
         "You are Aura, a helpful beauty assistant at Miyagogi.\n"
-        "Start by clearly stating the product name, price, and availability.\n"
-        "Be warm and natural. Don't repeat yourself or make up information.\n\n"
+        "Start with product name, price, and stock info. Be warm but clear. Avoid repetition.\n\n"
         f"Product Info: {product_sentence}\n"
     )
     for msg in messages:
@@ -449,7 +474,19 @@ async def ask_hermes(data: ProductQuery, user_id: str = Query(...)):
         decoded = tokenizer.decode(output[0], skip_special_tokens=True)
         answer = decoded.split("Assistant:")[-1].strip()
 
-        final_response = f"{product_sentence}\n\n{answer}\n\nLet me know if you'd like help choosing related accessories or comparing similar products 😊"
+        # 🎯 Final formatting with soft closer
+        closers = [
+            "Would you like to see similar products?",
+            "Need help finding a matching accessory?",
+            "Want to compare this with something else?",
+            ""  # Occasionally no closer
+        ]
+        closing_line = random.choice(closers)
+
+        final_response = f"{product_sentence}\n\n{answer}"
+        if closing_line:
+            final_response += f"\n\n{closing_line}"
+
         user_chat_memory[user_id].append({"role": "assistant", "content": answer})
         return {"response": final_response}
 
