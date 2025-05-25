@@ -377,29 +377,23 @@ def fetch_woo_products(query_text, wc_url, wc_key, wc_secret, fallback_terms=Non
     return all_results
 
 # ──────────────────────────────── /ask Endpoint for Hermes Chat (Improved) ─────────────────────────────
-# PATCHED /ask ENDPOINT (API-Aware + Humanized)
-
 @app.post("/ask", response_model=Dict[str, str])
 async def ask_hermes(data: ProductQuery, user_id: str = Query(...)):
     query_text = data.query.strip()
     messages = user_chat_memory[user_id][-MEMORY_MAX_TURNS:]
     messages.append({"role": "user", "content": query_text})
 
-    # 🧠 Smart vague follow-up memory (store full product, not just name)
-    vague_keywords = ["how much", "price", "is it in stock", "availability", "is it good", "stock", "how many", "safe", "compare"]
+    # 🧠 Handle vague queries using last product memory
+    vague_keywords = ["how much", "price", "stock", "available", "is it good", "compare", "safe"]
     query_lower = query_text.lower()
     is_vague = any(kw in query_lower for kw in vague_keywords)
     word_count = len(query_lower.split())
 
-    # ⏪ Use last product match for vague queries
     if is_vague and word_count <= 5:
-        last_product = user_last_product_match.get(user_id)
-        if last_product:
-            product = last_product
-        else:
-            product = None
+        product = user_last_product_match.get(user_id)
+        if not product:
+            return {"response": "Could you tell me the product name you're asking about?"}
     else:
-        # 🔁 WooCommerce API call
         WC_URL = os.getenv("WC_URL") + "/wp-json/wc/v3/products"
         WC_KEY = os.getenv("WC_KEY")
         WC_SECRET = os.getenv("WC_SECRET")
@@ -410,29 +404,28 @@ async def ask_hermes(data: ProductQuery, user_id: str = Query(...)):
         )
         if response.status_code == 200 and response.json():
             product = response.json()[0]
-            user_last_product_match[user_id] = product  # Save full product for follow-ups
+            user_last_product_match[user_id] = product
         else:
-            return {"response": "I couldn’t find a match for that. Could you rephrase or try a brand like Thuya or Noemi?"}
+            return {"response": "I couldn’t find anything for that. Try asking about Thuya, Noemi, or Enigma products."}
 
-    # 🧠 Woo product summary cleanup (1-2 lines only)
-    if product:
-        name = product.get("name")
-        price = product.get("price", "N/A")
-        stock = "in stock" if product.get("stock_status") == "instock" else "out of stock"
-        summary_raw = product.get("short_description", "") or product.get("description", "")
-        summary = BeautifulSoup(summary_raw, "html.parser").get_text(" ", strip=True)
-        short_summary = summary[:300].rsplit(".", 1)[0] + "." if len(summary) > 300 else summary
+    # 🧾 Build product summary
+    name = product.get("name")
+    price = product.get("price", "N/A")
+    stock = "in stock" if product.get("stock_status") == "instock" else "out of stock"
+    summary_raw = product.get("short_description", "") or product.get("description", "")
+    summary = BeautifulSoup(summary_raw, "html.parser").get_text(" ", strip=True)
+    short_summary = summary[:400].rsplit(".", 1)[0] + "." if len(summary) > 400 else summary
 
-        product_sentence = f"The {name} is available for AED {price} and it's currently {stock}."
-        if short_summary:
-            product_sentence += f" {short_summary}"
+    product_sentence = f"The {name} is available for AED {price} and it's currently {stock}."
+    if short_summary and short_summary.lower() not in product_sentence.lower():
+        product_sentence += f" {short_summary}"
 
-    # 🤖 LLM Prompt
+    # 🤖 Prompt for LLM
     prompt = (
-        "You are Aura, a kind and knowledgeable beauty consultant at Miyagogi.\n"
-        "Always answer like a human, clearly and conversationally.\n"
-        "Start with the product name, price, and stock. Do not repeat descriptions or sound robotic.\n"
-        f"\nProduct Info: {product_sentence}\n"
+        "You are Aura, a helpful beauty consultant at Miyagogi.\n"
+        "Respond conversationally like a human. Start with product info clearly, then offer helpful guidance if asked about comparisons, use cases, safety, or value.\n"
+        "Never repeat the summary or sound like a bot.\n\n"
+        f"Product Info: {product_sentence}\n"
     )
     for msg in messages:
         prompt += f"{msg['role'].capitalize()}: {msg['content']}\n"
@@ -446,16 +439,18 @@ async def ask_hermes(data: ProductQuery, user_id: str = Query(...)):
             attention_mask=inputs["attention_mask"],
             max_new_tokens=300,
             do_sample=False,
-            temperature=0.7,
+            temperature=0.75,
             top_p=0.9,
             pad_token_id=tokenizer.eos_token_id,
         )
         decoded = tokenizer.decode(output[0], skip_special_tokens=True)
         answer = decoded.split("Assistant:")[-1].strip()
 
-        final_response = f"{product_sentence}\n\n{answer}\n\nLet me know if you'd like help choosing related accessories or comparing similar products."
+        final_response = f"{product_sentence}\n\n{answer}\n\nLet me know if you'd like help comparing this with other products or placing an order 😊"
+
         user_chat_memory[user_id].append({"role": "user", "content": query_text})
         user_chat_memory[user_id].append({"role": "assistant", "content": answer})
+
         return {"response": final_response}
 
     except torch.cuda.OutOfMemoryError:
@@ -463,7 +458,7 @@ async def ask_hermes(data: ProductQuery, user_id: str = Query(...)):
         return {"error": "Hermes ran out of memory."}
     except Exception as e:
         logger.error(f"❌ Hermes error: {e}")
-        return {"error": "Hermes model failed."}
+        return {"error": "Sorry, something went wrong while processing your request."}
 # ─────────────────────────────── Bot Lifecycle ──────────────────────────────────
 @app.on_event("startup")
 async def startup():
