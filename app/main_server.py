@@ -353,6 +353,29 @@ async def interpret_query(data: ProductQuery):
         logger.error(f"/interpret failed: {e}")
         return {"error": "Interpretation failed."}
 
+# ─────────────── Woo API Helper ────────────────
+def fetch_woo_products(query_text, wc_url, wc_key, wc_secret, fallback_terms=None):
+    all_results = []
+    seen_ids = set()
+    terms_to_try = [query_text] + (fallback_terms or [])
+    
+    for term in terms_to_try:
+        resp = requests.get(
+            wc_url + "/wp-json/wc/v3/products",
+            params={"search": term, "per_page": 20},
+            auth=HTTPBasicAuth(wc_key, wc_secret),
+        )
+        if resp.status_code != 200:
+            continue
+        for p in resp.json():
+            if p["id"] not in seen_ids:
+                all_results.append(p)
+                seen_ids.add(p["id"])
+        if all_results:
+            break  # stop once we find relevant results
+    
+    return all_results
+
 # ──────────────────────────────── /ask Endpoint for Hermes Chat (Improved) ─────────────────────────────
 @app.post("/ask", response_model=Dict[str, str])
 async def ask_hermes(data: ProductQuery, user_id: str = Query(...)):
@@ -360,7 +383,6 @@ async def ask_hermes(data: ProductQuery, user_id: str = Query(...)):
     messages = user_chat_memory[user_id][-MEMORY_MAX_TURNS:]
     messages.append({"role": "user", "content": query_text})
 
-    # 🧠 Smart memory fallback only for vague, short follow-ups
     vague_keywords = ["how much", "price", "is it in stock", "availability", "is it good", "stock", "how many"]
     query_lower = query_text.lower()
     is_vague = any(kw in query_lower for kw in vague_keywords)
@@ -371,62 +393,28 @@ async def ask_hermes(data: ProductQuery, user_id: str = Query(...)):
         if last_product:
             query_text = last_product
 
-    # 🔍 Special Case: Show all brands
-    if query_text.lower() in ["show all brands", "brands available", "list brands"]:
-        WC_URL = os.getenv("WC_URL") + "/wp-json/wc/v3/products"
-        WC_KEY = os.getenv("WC_KEY")
-        WC_SECRET = os.getenv("WC_SECRET")
-        response = requests.get(
-            WC_URL,
-            params={"per_page": 100},
-            auth=HTTPBasicAuth(WC_KEY, WC_SECRET),
-        )
-        if response.status_code == 200 and response.json():
-            brand_tags = set()
-            for product in response.json():
-                for tag in product.get("tags", []):
-                    brand_tags.add(tag.get("name", "").strip())
-            brand_list = ", ".join(sorted(brand_tags))
-            return {"response": f"Here are the brands available at Miyagogi: {brand_list}."}
-        else:
-            return {"response": "Sorry, I couldn’t fetch brand information right now."}
-
-    # 🔁 Step 1: WooCommerce API live search
-    WC_URL = os.getenv("WC_URL") + "/wp-json/wc/v3/products"
+    WC_URL = os.getenv("WC_URL")
     WC_KEY = os.getenv("WC_KEY")
     WC_SECRET = os.getenv("WC_SECRET")
-    response = requests.get(
-        WC_URL,
-        params={"search": query_text, "per_page": 1},
-        auth=HTTPBasicAuth(WC_KEY, WC_SECRET),
-    )
+    fallback_terms = ["glue", "remover", "cleanser", "serum", "kit", "oil", "tweezer", "lash", "brow"]
 
-    product_sentence = ""
-    if response.status_code == 200 and response.json():
-        product = response.json()[0]
-        name = product.get("name")
-        price = product.get("price", "N/A")
-        stock = "in stock" if product.get("stock_status") == "instock" else "out of stock"
-        summary = BeautifulSoup(product.get("short_description", ""), "html.parser").get_text(" ", strip=True)
-        product_sentence = f"The {name} is available for AED {price} and it's currently {stock}. {summary.strip()}"
-        user_last_product_match[user_id] = name.lower()
-    else:
-        keywords = query_text.lower().split()
-        results = search_products_by_keywords(keywords, DB_PATH)
-        if results:
-            suggestions = []
-            for brand, items in results.items():
-                for item in items:
-                    stock = "in stock" if item['stock'] == "instock" else "out of stock"
-                    suggestions.append(f"{item['name']} — AED {item['price']} ({stock})")
-            if suggestions:
-                return {"response": "Here are a few products you might like:\n" + "\n".join(suggestions[:3]) + "\n\nLet me know if you'd like help comparing them."}
-        return {"response": "I couldn’t find a match for that. Could you rephrase or try a brand like Thuya or Noemi?"}
+    products = fetch_woo_products(query_text, WC_URL, WC_KEY, WC_SECRET, fallback_terms)
+
+    if not products:
+        return {"response": "I couldn’t find a match for that. Could you rephrase or try a brand like Thuya, Noemi, or Enigma?"}
+
+    product = products[0]
+    name = product.get("name", "")
+    price = product.get("price", "N/A")
+    stock = "in stock" if product.get("stock_status") == "instock" else "out of stock"
+    from bs4 import BeautifulSoup
+    summary = BeautifulSoup(product.get("short_description", ""), "html.parser").get_text(" ", strip=True)
+    product_sentence = f"The {name} is available for AED {price} and it's currently {stock}. {summary.strip()}"
+    user_last_product_match[user_id] = name.lower()
 
     prompt = (
-        "You are Aura, a helpful beauty assistant at Miyagogi.\n"
-        "Start by clearly stating the product name, price, and availability.\n"
-        "Be warm and natural. Don't repeat yourself or make up information.\n\n"
+        "You are Aura, a helpful and professional beauty assistant at Miyagogi.\n"
+        "Clearly state the product name, price, and availability. Sound natural, avoid repetition.\n\n"
         f"Product Info: {product_sentence}\n"
     )
     for msg in messages:
@@ -459,6 +447,7 @@ async def ask_hermes(data: ProductQuery, user_id: str = Query(...)):
     except Exception as e:
         logger.error(f"❌ Hermes error: {e}")
         return {"error": "Hermes model failed."}
+
 # ─────────────────────────────── Bot Lifecycle ──────────────────────────────────
 @app.on_event("startup")
 async def startup():
