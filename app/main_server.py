@@ -376,62 +376,62 @@ def fetch_woo_products(query_text, wc_url, wc_key, wc_secret, fallback_terms=Non
     
     return all_results
 
-# ──────────────────────────────── /ask Endpoint for Hermes Chat (Improved) ─────────────────────────────
-# PATCHED /ask ENDPOINT (API-Aware + Humanized, Final Fix)
+# app/main_server.py
+# (all existing imports remain unchanged)
 
+# ──────────────────────────────── /ask Endpoint for Hermes Chat (FINAL HUMANIZED) ─────────────────────────────
 @app.post("/ask", response_model=Dict[str, str])
 async def ask_hermes(data: ProductQuery, user_id: str = Query(...)):
     query_text = data.query.strip()
     messages = user_chat_memory[user_id][-MEMORY_MAX_TURNS:]
     messages.append({"role": "user", "content": query_text})
 
-    # 🧠 Smart vague follow-up memory
-    vague_keywords = ["how much", "price", "is it in stock", "availability", "is it good", "stock", "how many", "safe", "compare"]
+    vague_keywords = [
+        "how much", "price", "in stock", "availability", "is it good",
+        "compare", "compare with", "safe", "how many", "details", "ingredients"
+    ]
     query_lower = query_text.lower()
     is_vague = any(kw in query_lower for kw in vague_keywords)
     word_count = len(query_lower.split())
 
-    # WooCommerce credentials
-    WC_URL = os.getenv("WC_URL") + "/wp-json/wc/v3/products"
-    WC_KEY = os.getenv("WC_KEY")
-    WC_SECRET = os.getenv("WC_SECRET")
     product = None
-
     if is_vague and word_count <= 5:
-        last_product = user_last_product_match.get(user_id)
-        if isinstance(last_product, dict):
-            product = last_product
-        elif isinstance(last_product, str):
-            response = requests.get(WC_URL, params={"search": last_product, "per_page": 1}, auth=HTTPBasicAuth(WC_KEY, WC_SECRET))
-            if response.status_code == 200 and response.json():
-                product = response.json()[0]
-    else:
-        response = requests.get(WC_URL, params={"search": query_text, "per_page": 1}, auth=HTTPBasicAuth(WC_KEY, WC_SECRET))
+        product = user_last_product_match.get(user_id)
+
+    if not product:
+        # WooCommerce API Search
+        WC_URL = os.getenv("WC_URL") + "/wp-json/wc/v3/products"
+        WC_KEY = os.getenv("WC_KEY")
+        WC_SECRET = os.getenv("WC_SECRET")
+        response = requests.get(
+            WC_URL,
+            params={"search": query_text, "per_page": 3},
+            auth=HTTPBasicAuth(WC_KEY, WC_SECRET),
+        )
         if response.status_code == 200 and response.json():
-            product = response.json()[0]
-            user_last_product_match[user_id] = product
+            product = response.json()[0]  # use best match
+            user_last_product_match[user_id] = product  # store full object
         else:
-            return {"response": "I couldn’t find a match for that. Could you rephrase or try a brand like Thuya or Noemi?"}
+            return {"response": "I couldn’t find a match for that. Could you try rephrasing or ask about brands like Thuya or Noemi?"}
 
-    if product:
-        name = product.get("name")
-        price = product.get("price", "N/A")
-        stock = "in stock" if product.get("stock_status") == "instock" else "out of stock"
-        summary_raw = product.get("short_description", "") or product.get("description", "")
-        summary = BeautifulSoup(summary_raw, "html.parser").get_text(" ", strip=True)
-        short_summary = summary[:300].rsplit(".", 1)[0] + "." if len(summary) > 300 else summary
-        product_sentence = f"The {name} is available for AED {price} and it's currently {stock}."
-        if short_summary:
-            product_sentence += f" {short_summary}"
-    else:
-        return {"response": "Sorry, I couldn’t find any product information."}
+    # Product Info Extraction
+    name = product.get("name")
+    price = product.get("price", "N/A")
+    stock = "in stock" if product.get("stock_status") == "instock" else "out of stock"
+    summary_raw = product.get("short_description", "") or product.get("description", "")
+    summary = BeautifulSoup(summary_raw, "html.parser").get_text(" ", strip=True)
+    short_summary = summary[:400].rsplit(".", 1)[0] + "." if len(summary) > 400 else summary
 
-    # 🤖 LLM Prompt
+    product_sentence = f"The {name} is available for AED {price} and it's currently {stock}."
+    if short_summary:
+        product_sentence += f" {short_summary}"
+
+    # Final prompt to LLM
     prompt = (
-        "You are Aura, a kind and knowledgeable beauty consultant at Miyagogi.\n"
-        "Always answer like a human, clearly and conversationally.\n"
-        "Start with the product name, price, and stock. Do not repeat descriptions or sound robotic.\n"
-        f"\nProduct Info: {product_sentence}\n"
+        "You are Aura, a kind and intelligent beauty assistant at Miyagogi.\n"
+        "Use the product info below to reply naturally to the customer.\n"
+        "Avoid repeating the exact same lines. Give real, human-like answers.\n"
+        f"\nProduct Info: {product_sentence}\n\n"
     )
     for msg in messages:
         prompt += f"{msg['role'].capitalize()}: {msg['content']}\n"
