@@ -398,12 +398,20 @@ async def ask_hermes(data: ProductQuery, user_id: str = Query(...)):
     WC_SECRET = os.getenv("WC_SECRET")
     fallback_terms = ["glue", "remover", "cleanser", "serum", "kit", "oil", "tweezer", "lash", "brow"]
 
-    products = fetch_woo_products(query_text, WC_URL, WC_KEY, WC_SECRET, fallback_terms)
+    all_products = fetch_woo_products(query_text, WC_URL, WC_KEY, WC_SECRET, fallback_terms)
 
-    if not products:
+    # ✅ Filter: match query text in name/categories/tags
+    matched_products = [
+        p for p in all_products
+        if query_text.lower() in p.get("name", "").lower()
+        or any(query_text.lower() in tag.get("name", "").lower() for tag in p.get("tags", []))
+        or any(query_text.lower() in cat.get("name", "").lower() for cat in p.get("categories", []))
+    ]
+    product = matched_products[0] if matched_products else (all_products[0] if all_products else None)
+
+    if not product:
         return {"response": "I couldn’t find a match for that. Could you rephrase or try a brand like Thuya, Noemi, or Enigma?"}
 
-    product = products[0]
     name = product.get("name", "")
     price = product.get("price", "N/A")
     stock = "in stock" if product.get("stock_status") == "instock" else "out of stock"
@@ -436,9 +444,20 @@ async def ask_hermes(data: ProductQuery, user_id: str = Query(...)):
         decoded = tokenizer.decode(output[0], skip_special_tokens=True)
         answer = decoded.split("Assistant:")[-1].strip()
 
-        final_response = f"{product_sentence}\n\n{answer}\n\nLet me know if you'd like help choosing related accessories or comparing similar products 😊"
+        # ✅ Clean duplicate response blocks
+        lines = answer.split("\n")
+        unique_lines = []
+        seen = set()
+        for line in lines:
+            norm = line.strip().lower()
+            if norm and norm not in seen:
+                unique_lines.append(line)
+                seen.add(norm)
+        cleaned_answer = "\n".join(unique_lines)
+
+        final_response = f"{product_sentence}\n\n{cleaned_answer}\n\nLet me know if you'd like help choosing related accessories or comparing similar products 😊"
         user_chat_memory[user_id].append({"role": "user", "content": query_text})
-        user_chat_memory[user_id].append({"role": "assistant", "content": answer})
+        user_chat_memory[user_id].append({"role": "assistant", "content": cleaned_answer})
         return {"response": final_response}
 
     except torch.cuda.OutOfMemoryError:
