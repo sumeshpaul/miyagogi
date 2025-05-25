@@ -454,7 +454,16 @@ async def ask_hermes(data: ProductQuery, user_id: str = Query(...)):
         answer = decoded.split("Assistant:")[-1].strip()
 
         final_response = f"{product_sentence}\n\n{answer}\n\nLet me know if you'd like help choosing related accessories or comparing similar products."
+        user_chat_memory[user_id].append({"role": "user", "content": query_text})
+        user_chat_memory[user_id].append({"role": "assistant", "content": answer})
+        return {"response": final_response}
 
+    except torch.cuda.OutOfMemoryError:
+        torch.cuda.empty_cache()
+        return {"error": "Hermes ran out of memory."}
+    except Exception as e:
+        logger.error(f"❌ Hermes error: {e}")
+        return {"error": "Hermes model failed."}
 # ─────────────────────────────── Bot Lifecycle ──────────────────────────────────
 @app.on_event("startup")
 async def startup():
