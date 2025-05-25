@@ -383,50 +383,51 @@ async def ask_hermes(data: ProductQuery, user_id: str = Query(...)):
     messages = user_chat_memory[user_id][-MEMORY_MAX_TURNS:]
     messages.append({"role": "user", "content": query_text})
 
-    # 🧠 Vague follow-up handling
-    vague_keywords = ["how much", "price", "is it in stock", "availability", "is it good", "stock", "how many", "safe", "compare"]
-    query_lower = query_text.lower()
-    is_vague = any(kw in query_lower for kw in vague_keywords)
-    word_count = len(query_lower.split())
+    # 🧠 Check for vague follow-up
+    vague_keywords = ["how much", "price", "is it in stock", "availability", "is it good"]
+    if any(kw in query_text.lower() for kw in vague_keywords):
+        last_product = user_last_product_match.get(user_id)
+        if last_product:
+            query_text = last_product  # Use last product for vague question
 
-    # 🔄 Use memory if vague follow-up
-    if is_vague and word_count <= 5:
-        product = user_last_product_match.get(user_id)
-        if not product:
-            return {"response": "I couldn’t find a match for that. Could you rephrase or ask about a specific product?"}
+    # 🔍 Step 1: WooCommerce API live search
+    WC_URL = os.getenv("WC_URL") + "/wp-json/wc/v3/products"
+    WC_KEY = os.getenv("WC_KEY")
+    WC_SECRET = os.getenv("WC_SECRET")
+    response = requests.get(
+        WC_URL,
+        params={"search": query_text, "per_page": 1},
+        auth=HTTPBasicAuth(WC_KEY, WC_SECRET),
+    )
+
+    product_sentence = ""
+    if response.status_code == 200 and response.json():
+        product = response.json()[0]
+        name = product.get("name")
+        price = product.get("price", "N/A")
+        stock = "in stock" if product.get("stock_status") == "instock" else "out of stock"
+        summary = BeautifulSoup(product.get("short_description", ""), "html.parser").get_text(" ", strip=True)
+        product_sentence = f"The {name} is available for AED {price} and it's currently {stock}. {summary.strip()}"
+        user_last_product_match[user_id] = name.lower()
     else:
-        # 🔍 WooCommerce API search
-        WC_URL = os.getenv("WC_URL") + "/wp-json/wc/v3/products"
-        WC_KEY = os.getenv("WC_KEY")
-        WC_SECRET = os.getenv("WC_SECRET")
-        response = requests.get(
-            WC_URL,
-            params={"search": query_text, "per_page": 1},
-            auth=HTTPBasicAuth(WC_KEY, WC_SECRET),
-        )
-        if response.status_code == 200 and response.json():
-            product = response.json()[0]
-            user_last_product_match[user_id] = product  # 🧠 Save full product
-        else:
-            return {"response": "I couldn’t find a match for that. Could you rephrase or try asking about Thuya or Noemi products?"}
+        # 🔁 Step 2: DB keyword fallback
+        keywords = query_text.lower().split()
+        results = search_products_by_keywords(keywords, DB_PATH)
+        if results:
+            suggestions = []
+            for brand, items in results.items():
+                for item in items:
+                    stock = "in stock" if item['stock'] == "instock" else "out of stock"
+                    suggestions.append(f"{item['name']} — AED {item['price']} ({stock})")
+            if suggestions:
+                return {"response": "Here are a few products you might like:\n" + "\n".join(suggestions[:3]) + "\n\nLet me know if you'd like help comparing them."}
+        return {"response": "I couldn’t find a match for that. Could you rephrase or try a brand like Thuya or Noemi?"}
 
-    # 🧾 Build context
-    name = product.get("name", "")
-    price = product.get("price", "N/A")
-    stock = "in stock" if product.get("stock_status") == "instock" else "out of stock"
-    summary_raw = product.get("short_description", "") or product.get("description", "")
-    summary = BeautifulSoup(summary_raw, "html.parser").get_text(" ", strip=True)
-    short_summary = summary[:300].rsplit(".", 1)[0] + "." if len(summary) > 300 else summary
-
-    product_sentence = f"The {name} is available for AED {price} and it's currently {stock}."
-    if short_summary:
-        product_sentence += f" {short_summary}"
-
-    # 🤖 Build LLM prompt
+    # 🤖 LLM prompt
     prompt = (
-        "You are Aura, a kind and knowledgeable beauty consultant at Miyagogi.\n"
-        "Always answer like a human, clearly and conversationally.\n"
-        "Start with the product name, price, and stock. Don't repeat or make things up.\n\n"
+        "You are Aura, a helpful beauty assistant at Miyagogi.\n"
+        "Start by clearly stating the product name, price, and availability.\n"
+        "Be warm and natural. Don't repeat yourself or make up information.\n\n"
         f"Product Info: {product_sentence}\n"
     )
     for msg in messages:
@@ -448,7 +449,7 @@ async def ask_hermes(data: ProductQuery, user_id: str = Query(...)):
         decoded = tokenizer.decode(output[0], skip_special_tokens=True)
         answer = decoded.split("Assistant:")[-1].strip()
 
-        final_response = f"{product_sentence}\n\n{answer}\n\nLet me know if you'd like help comparing or ordering 😊"
+        final_response = f"{product_sentence}\n\n{answer}\n\nLet me know if you'd like help choosing related accessories or comparing similar products 😊"
         user_chat_memory[user_id].append({"role": "assistant", "content": answer})
         return {"response": final_response}
 
